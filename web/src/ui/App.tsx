@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { downloadBlob, exportPhoto, outputName } from '../io/exportPhoto';
-import { type LoadedPhoto, loadPhoto } from '../io/importPhoto';
-import { type Adjustments, type Analysis, DEFAULT_ADJUSTMENTS, IDENTITY_CORRECTION } from '../model';
-import { analyze } from '../worker/client';
-import { Controls } from './Controls';
-import { Viewer } from './Viewer';
+import { alreadyCorrected, createJob, isCancel, type Job, prepare, process } from '../batch/queue';
+import { fromDirectory, fromDrop, fromFiles, fsAccess, pickFiles, pickFolder, pickOutputFolder, type Source } from '../io/sources';
+import type { Adjustments } from '../model';
+import { type Settings, useSettings } from '../settings/settings';
+import { EditorView } from './EditorView';
+import { QueueView, type RunState } from './QueueView';
+import { SettingsDialog } from './SettingsDialog';
 import turtleUrl from '../../../testdata/photos/turtle_before.jpg?url';
 import coralUrl from '../../../testdata/photos/coral_before.jpg?url';
 import dolphinsUrl from '../../../testdata/photos/dolphins_before.jpg?url';
@@ -17,81 +18,171 @@ const SAMPLES = [
   { label: 'Coral with flash', name: 'coral_flash.jpg', url: flashUrl },
 ];
 
-const JPEG_QUALITY = 92;
+const text = (error: unknown) => (error instanceof Error ? error.message : String(error));
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
-function describe(analysis: Analysis): string {
-  const loss = Math.round(analysis.depletion * 100);
-  if (analysis.depletion < 0.05) return 'Red is healthy in this photo, so no automatic correction was applied.';
-  if (analysis.depletion < 0.6) return `Red is partly lost (${loss}%). A reduced correction was applied.`;
-  return `Red is almost gone (${loss}% lost). Full correction applied.`;
+/** Tell the user, before anything is written, where results will go. */
+function describeDestination(jobs: Job[], settings: Settings): string {
+  const targets = jobs.filter((j) => ['ready', 'analyzing', 'done', 'failed', 'running'].includes(j.status));
+  if (targets.length === 0) return '';
+  const withDir = targets.filter((j) => j.source.dir);
+  const withHandle = targets.filter((j) => j.source.handle);
+  const next =
+    withDir.length === targets.length
+      ? `saved next to the originals in "${withDir[0].source.dir!.name}"`
+      : fsAccess.folders && targets.every((j) => j.source.dir || j.source.handle)
+        ? 'saved to a folder you choose when you start (the originals\' folder is suggested)'
+        : 'saved to this browser\'s download folder';
+  if (settings.outputMode === 'overwrite') {
+    if (withHandle.length === 0) return `Originals cannot be replaced here; results are ${next}.`;
+    return `JPEG originals are replaced. Other results are ${next}.`;
+  }
+  return `Results are ${next}, with "${settings.suffix}" added to the name.`;
 }
 
 export function App() {
-  const [photo, setPhoto] = useState<LoadedPhoto | null>(null);
-  const [analysis, setAnalysis] = useState<Analysis | null>(null);
-  const [adjustments, setAdjustments] = useState<Adjustments>(DEFAULT_ADJUSTMENTS);
-  const [compare, setCompare] = useState(false);
-  const [showOriginal, setShowOriginal] = useState(false);
-  const [busy, setBusy] = useState<string | null>(null);
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [editing, setEditing] = useState<number | null>(null);
+  const [run, setRun] = useState<RunState | null>(null);
+  const [settings, setSettings] = useSettings();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [confirm, setConfirm] = useState<number[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [opening, setOpening] = useState(false);
   const [dragOver, setDragOver] = useState(false);
-  const fileInput = useRef<HTMLInputElement>(null);
-  const loadToken = useRef(0);
 
-  const open = useCallback(async (file: Blob, name: string) => {
-    const token = ++loadToken.current;
-    setError(null);
-    setBusy('Opening photo…');
-    try {
-      const loaded = await loadPhoto(file, name);
-      const result = await analyze(loaded.analysisPixels);
-      if (token !== loadToken.current) return; // a newer photo was opened meanwhile
-      setPhoto(loaded);
-      setAnalysis(result);
-      setAdjustments(DEFAULT_ADJUSTMENTS);
-    } catch (e) {
-      if (token === loadToken.current) setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      if (token === loadToken.current) setBusy(null);
-    }
+  const fileInput = useRef<HTMLInputElement>(null);
+  const jobsRef = useRef(jobs);
+  jobsRef.current = jobs;
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+  const prepChain = useRef<Promise<void>>(Promise.resolve());
+  const abort = useRef<AbortController | null>(null);
+  /** Ids of jobs taken out of the queue; their pending analysis is dropped. */
+  const removed = useRef(new Set<number>());
+
+  const patch = useCallback((id: number, change: Partial<Job>) => {
+    setJobs((list) => list.map((job) => (job.id === id ? { ...job, ...change } : job)));
   }, []);
 
-  const openSample = async (sample: (typeof SAMPLES)[number]) => {
-    setBusy('Opening photo…');
-    try {
-      const response = await fetch(sample.url);
-      if (!response.ok) throw new Error('The sample photo could not be loaded.');
-      await open(await response.blob(), sample.name);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      setBusy(null);
-    }
-  };
-
-  const save = async () => {
-    if (!photo || !analysis) return;
+  const addSources = useCallback((sources: Source[]) => {
+    if (sources.length === 0) return;
     setError(null);
-    try {
-      const blob = await exportPhoto(photo.file, analysis.correction, adjustments, JPEG_QUALITY, (fraction, stage) => {
-        setBusy(stage === 'render' ? `Correcting… ${Math.round(fraction * 100)}%` : 'Encoding JPEG…');
+    setNotice(null);
+    const created = sources.map((source) => createJob(source, settingsRef.current));
+    const wasEmpty = jobsRef.current.length === 0;
+    setJobs((list) => [...list, ...created]);
+    if (wasEmpty && created.length === 1 && created[0].status === 'analyzing') setEditing(created[0].id);
+    // Analyse one at a time in the background.
+    for (const job of created) {
+      if (job.status !== 'analyzing') continue;
+      prepChain.current = prepChain.current.then(async () => {
+        if (removed.current.has(job.id)) return;
+        try {
+          if (settingsRef.current.skipProcessed && (await alreadyCorrected(job.source))) {
+            patch(job.id, { status: 'skipped', message: 'Already corrected by UWCC.' });
+            return;
+          }
+          patch(job.id, { ...(await prepare(job.source)), status: 'ready' });
+        } catch (e) {
+          patch(job.id, { status: 'unsupported', message: text(e) });
+        }
       });
-      downloadBlob(blob, outputName(photo.name));
+    }
+  }, [patch]);
+
+  const guarded = async (action: () => Promise<Source[] | null>) => {
+    setOpening(true);
+    try {
+      const sources = await action();
+      if (sources === null) fileInput.current?.click();
+      else addSources(sources);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(text(e));
     } finally {
-      setBusy(null);
+      setOpening(false);
     }
   };
 
-  // Drop a file anywhere on the page.
+  const openSample = (sample: (typeof SAMPLES)[number]) => guarded(async () => {
+    const response = await fetch(sample.url);
+    if (!response.ok) throw new Error('The sample photo could not be loaded.');
+    return fromFiles([new File([await response.blob()], sample.name, { type: 'image/jpeg' })]);
+  });
+
+  /** Process the given jobs one after another. */
+  const start = useCallback(async (ids: number[], confirmed = false) => {
+    if (abort.current) return;
+    const current = settingsRef.current;
+    const targets = jobsRef.current.filter((j) => ids.includes(j.id) && j.analysis);
+    if (targets.length === 0) return;
+    if (current.outputMode === 'overwrite' && !confirmed && targets.some((j) => j.source.handle)) {
+      setConfirm(ids);
+      return;
+    }
+    setError(null);
+    setNotice(null);
+
+    // Sources picked as single files have no folder of their own: ask once, before any work.
+    let fallbackDir: FileSystemDirectoryHandle | null = null;
+    const orphan = targets.find((j) => j.source.handle && !j.source.dir);
+    if (orphan && current.outputMode === 'next') {
+      try {
+        fallbackDir = await pickOutputFolder(orphan.source.handle);
+      } catch (e) {
+        setError(text(e));
+        return;
+      }
+      if (!fallbackDir) {
+        setNotice('No folder was chosen, so nothing was processed.');
+        return;
+      }
+    }
+
+    const controller = new AbortController();
+    abort.current = controller;
+    let wakeLock: { release(): Promise<void> } | null = null;
+    try {
+      wakeLock = await (navigator as unknown as { wakeLock?: { request(type: string): Promise<{ release(): Promise<void> }> } }).wakeLock?.request('screen') ?? null;
+    } catch { /* optional */ }
+
+    const single = targets.length === 1;
+    let finished = 0;
+    if (!single) setRun({ active: true, total: targets.length, finished, cancelled: false });
+    for (const job of targets) {
+      if (controller.signal.aborted) break;
+      patch(job.id, { status: 'running', progress: 0, message: undefined, result: undefined });
+      try {
+        // Read the job again: adjustments may have changed since the run was requested.
+        const fresh = jobsRef.current.find((j) => j.id === job.id) ?? job;
+        const result = await process(fresh, current, fallbackDir, (progress) => patch(job.id, { progress }), controller.signal);
+        patch(job.id, { status: 'done', result, progress: 1 });
+        if (single) setNotice(result.kind === 'replaced' ? `Replaced ${result.location}.` : `Saved as ${result.location}.${result.note ? ' ' + result.note : ''}`);
+      } catch (e) {
+        if (isCancel(e)) {
+          patch(job.id, { status: 'ready', progress: undefined });
+          break;
+        }
+        patch(job.id, { status: 'failed', message: text(e) });
+        if (single) setError(`${job.source.name}: ${text(e)}`);
+      }
+      finished++;
+      if (!single) setRun({ active: true, total: targets.length, finished, cancelled: false });
+    }
+    if (!single) setRun({ active: false, total: targets.length, finished, cancelled: controller.signal.aborted });
+    abort.current = null;
+    try { await wakeLock?.release(); } catch { /* ignore */ }
+  }, [patch]);
+
+  // Drop files or folders anywhere on the page.
   useEffect(() => {
     const over = (e: DragEvent) => { if (e.dataTransfer?.types.includes('Files')) { e.preventDefault(); setDragOver(true); } };
     const leave = (e: DragEvent) => { if (!e.relatedTarget) setDragOver(false); };
     const drop = (e: DragEvent) => {
       e.preventDefault();
       setDragOver(false);
-      const file = e.dataTransfer?.files[0];
-      if (file) void open(file, file.name);
+      if (e.dataTransfer) fromDrop(e.dataTransfer).then(addSources).catch((err) => setError(text(err)));
     };
     window.addEventListener('dragover', over);
     window.addEventListener('dragleave', leave);
@@ -101,89 +192,122 @@ export function App() {
       window.removeEventListener('dragleave', leave);
       window.removeEventListener('drop', drop);
     };
-  }, [open]);
+  }, [addSources]);
 
-  const pick = (
-    <input
-      ref={fileInput}
-      type="file"
-      accept="image/*"
-      hidden
-      onChange={(e) => {
-        const file = e.target.files?.[0];
-        if (file) void open(file, file.name);
-        e.target.value = '';
-      }}
-    />
-  );
+  // Hook for automated tests: add a folder without going through the system picker.
+  useEffect(() => {
+    (window as unknown as { uwccTest?: object }).uwccTest = {
+      addDirectory: async (dir: FileSystemDirectoryHandle) => addSources(await fromDirectory(dir)),
+    };
+  }, [addSources]);
 
-  const hold = {
-    onPointerDown: () => setShowOriginal(true),
-    onPointerUp: () => setShowOriginal(false),
-    onPointerLeave: () => setShowOriginal(false),
-    onPointerCancel: () => setShowOriginal(false),
-    onKeyDown: (e: React.KeyboardEvent) => { if (e.key === ' ' || e.key === 'Enter') setShowOriginal(true); },
-    onKeyUp: () => setShowOriginal(false),
-    onBlur: () => setShowOriginal(false),
+  const editingJob = jobs.find((j) => j.id === editing) ?? null;
+  const running = jobs.some((j) => j.status === 'running');
+  const active = !!run?.active;
+  const readyIds = jobs.filter((j) => j.status === 'ready').map((j) => j.id);
+  const overwrite = settings.outputMode === 'overwrite' && jobs.some((j) => j.source.handle);
+  const startLabel = overwrite ? `Replace ${plural(readyIds.length, 'original')}` : `Correct ${plural(readyIds.length, 'photo')}`;
+  const busy = editingJob?.status === 'running'
+    ? (editingJob.progress ?? 0) < 0.7 ? `Correcting… ${Math.round(((editingJob.progress ?? 0) / 0.7) * 100)}%` : 'Encoding and saving…'
+    : null;
+
+  const remove = (ids: number[]) => {
+    ids.forEach((id) => removed.current.add(id));
+    setJobs((list) => list.filter((j) => !ids.includes(j.id)));
+  };
+  const clearAll = () => { remove(jobs.map((j) => j.id)); setEditing(null); setRun(null); setNotice(null); setError(null); };
+  const applyToAll = (adjustments: Adjustments) => {
+    setJobs((list) => list.map((job) => ({ ...job, adjustments })));
+    setNotice(`Adjustments applied to all ${jobs.length} photos.`);
   };
 
   return (
     <div className={'app' + (dragOver ? ' drag-over' : '')}>
       <header>
         <h1>UWCC <span>UnderWater Color Correction</span></h1>
-        {photo && (
-          <div className="actions">
-            <button type="button" className="ghost" onClick={() => fileInput.current?.click()} disabled={!!busy}>Open</button>
-            <button type="button" className="primary" onClick={save} disabled={!!busy}>Save</button>
-          </div>
-        )}
+        <div className="actions">
+          {editingJob && jobs.length > 1 && <button type="button" className="ghost" onClick={() => setEditing(null)} disabled={running}>Back to list</button>}
+          {jobs.length > 0 && !editingJob && <button type="button" className="ghost" onClick={clearAll} disabled={active}>Clear</button>}
+          {jobs.length > 0 && <button type="button" className="ghost" onClick={() => guarded(pickFiles)} disabled={active || running || opening}>Add</button>}
+          <button type="button" className="ghost" onClick={() => setSettingsOpen(true)} disabled={active || running}>Settings</button>
+          {editingJob && (
+            <button type="button" className="primary" onClick={() => start([editingJob.id])} disabled={running || !editingJob.analysis}>
+              {settings.outputMode === 'overwrite' && editingJob.source.handle ? 'Replace original' : 'Save'}
+            </button>
+          )}
+        </div>
       </header>
-      {pick}
 
-      {error && <div className="banner error" role="alert">{error}<button type="button" onClick={() => setError(null)} aria-label="Dismiss">×</button></div>}
+      <input
+        ref={fileInput}
+        type="file"
+        accept="image/*,video/*"
+        multiple
+        hidden
+        onChange={(e) => {
+          addSources(fromFiles(e.target.files ?? []));
+          e.target.value = '';
+        }}
+      />
 
-      {!photo ? (
+      {error && <div className="banner error" role="alert"><span>{error}</span><button type="button" onClick={() => setError(null)} aria-label="Dismiss">×</button></div>}
+      {notice && <div className="banner" role="status"><span>{notice}</span><button type="button" onClick={() => setNotice(null)} aria-label="Dismiss">×</button></div>}
+
+      {jobs.length === 0 ? (
         <main className="welcome">
           <div className="welcome-card">
             <h2>Bring the colour back to your underwater photos</h2>
-            <p>Open a photo to correct it automatically, then fine-tune it. Everything happens on this device; nothing is uploaded.</p>
-            <button type="button" className="primary big" onClick={() => fileInput.current?.click()} disabled={!!busy}>
-              {busy ?? 'Open a photo'}
-            </button>
-            <p className="hint">or drop a photo anywhere on this page</p>
+            <p>Open one photo to fine-tune it, or many to correct them all in one go. Everything happens on this device; nothing is uploaded.</p>
+            <div className="welcome-buttons">
+              <button type="button" className="primary big" onClick={() => guarded(pickFiles)} disabled={opening}>Open photos</button>
+              {fsAccess.folders && <button type="button" className="ghost big" onClick={() => guarded(pickFolder)} disabled={opening}>Open a folder</button>}
+            </div>
+            <p className="hint">or drop photos{fsAccess.folders ? ' or a folder' : ''} anywhere on this page</p>
             <div className="samples">
               <span>Try a sample:</span>
               {SAMPLES.map((s) => (
-                <button type="button" className="ghost" key={s.name} onClick={() => openSample(s)} disabled={!!busy}>{s.label}</button>
+                <button type="button" className="ghost" key={s.name} onClick={() => openSample(s)} disabled={opening}>{s.label}</button>
               ))}
             </div>
           </div>
         </main>
+      ) : editingJob ? (
+        <EditorView
+          job={editingJob}
+          multiple={jobs.length > 1}
+          busy={busy}
+          onChange={(adjustments) => patch(editingJob.id, { adjustments })}
+          onApplyToAll={() => applyToAll(editingJob.adjustments)}
+          onError={setError}
+        />
       ) : (
-        <main className="editor">
-          <section className="view">
-            <Viewer
-              photo={photo}
-              correction={analysis?.correction ?? IDENTITY_CORRECTION}
-              adjustments={adjustments}
-              compare={compare}
-              showOriginal={showOriginal}
-              onError={setError}
-            />
-            {busy && <div className="busy" role="status">{busy}</div>}
-          </section>
-          <aside className="panel">
-            <div className="panel-row">
-              <button type="button" className={'ghost toggle' + (compare ? ' on' : '')} aria-pressed={compare} onClick={() => setCompare(!compare)}>
-                Split view
-              </button>
-              <button type="button" className="ghost" {...hold}>Hold for original</button>
+        <QueueView
+          jobs={jobs}
+          run={run}
+          destination={describeDestination(jobs, settings)}
+          startLabel={startLabel}
+          onEdit={setEditing}
+          onRemove={(id) => remove([id])}
+          onStart={() => { setRun(null); void start(readyIds); }}
+          onCancel={() => abort.current?.abort()}
+          onRetry={() => { setRun(null); void start(jobs.filter((j) => j.status === 'failed').map((j) => j.id)); }}
+          onDismissSummary={() => setRun(null)}
+        />
+      )}
+
+      <SettingsDialog open={settingsOpen} settings={settings} onChange={setSettings} onClose={() => setSettingsOpen(false)} />
+
+      {confirm && (
+        <div className="overlay" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+          <div className="confirm">
+            <h2 id="confirm-title">Replace {plural(confirm.length, 'original')}?</h2>
+            <p>The corrected photos will take the place of the original files. The originals cannot be restored afterwards.</p>
+            <div className="dialog-actions">
+              <button type="button" className="ghost" onClick={() => setConfirm(null)}>Cancel</button>
+              <button type="button" className="danger" onClick={() => { const ids = confirm; setConfirm(null); void start(ids, true); }}>Replace</button>
             </div>
-            {analysis && <p className="info">{describe(analysis)}</p>}
-            <Controls adjustments={adjustments} onChange={setAdjustments} disabled={!!busy} />
-            <p className="meta">{photo.name} · {photo.width} × {photo.height}</p>
-          </aside>
-        </main>
+          </div>
+        </div>
       )}
     </div>
   );

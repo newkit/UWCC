@@ -19,7 +19,7 @@ for mobile with Capacitor. Progress per milestone is listed at the end of
 ## Layout
 
 - `core/` - Rust crate `uwcc-core`: analysis, parameter model, CPU reference implementation, WASM bindings.
-- `web/` - the app: React + TypeScript + Vite. `src/render/` shader and renderer, `src/worker/` WASM core and JPEG encoder off the main thread, `src/io/` import and export, `src/ui/` components.
+- `web/` - the app: React + TypeScript + Vite. `src/render/` shader and renderer, `src/worker/` WASM core and JPEG encoder off the main thread, `src/io/` sources, import, export and output targets, `src/batch/` the job queue, `src/settings/` persisted settings, `src/ui/` components.
 - `spike/m0/` - throwaway device test page for M0. Do not build the app on it.
 - `testdata/photos/` - reference pairs used by the core's tests and as in-app samples. `testdata/local/` is git-ignored.
 
@@ -66,7 +66,8 @@ Expect 0 or 1.
 - Video is streamed frame by frame; never hold a whole clip in memory.
 - Heavy work runs off the main thread.
 - Platform-specific code lives only in `web/src/io/` (behind interfaces) and the native media plugin under `mobile/plugins/media/`. The plugin does media access only, never processing.
-- The single-item editor and batch runs share one export path; batch is a queue in front of it.
+- The single-item editor and batch runs share one path: every file is a job in `web/src/batch/queue.ts`, analysed through `loadAnalysisCopy` and exported through `process`. Do not add a second analysis or export path.
+- Every JPEG written goes through `tagJpeg` (`web/src/io/jpegMarker.ts`); the marker is what prevents correcting a file twice.
 - Never modify or replace a source file unless the overwrite setting is on, and then only after the result was fully written and checked (`SPECIFICATION.md` §7.3). Never delete source files.
 - The app is standalone with no backend: all processing is on-device. Do not add network calls, server components, analytics or telemetry, and do not load code, fonts or assets from CDNs at runtime.
 

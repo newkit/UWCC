@@ -379,6 +379,9 @@ same code path with one entry.
   HEIC → JPEG, MP4/MOV → MP4.
 - Capture date and other metadata are copied, so results sort beside their
   sources in galleries.
+- Every JPEG UWCC writes carries a comment segment `UWCC corrected`. Together
+  with the suffix this is how earlier results are recognised (F18); the
+  marker also covers originals that were replaced in overwrite mode.
 
 ### 7.3 Overwrite mode
 
@@ -501,9 +504,24 @@ Status on 2026-11-23:
 - M2: first version live: open or drop a photo, automatic correction, six
   manual controls with reset, split view, hold for original. Missing: zoom
   and pan, neutral picker.
-- M3: full-resolution tiled JPEG export works. Missing: EXIF metadata is not
-  copied yet, quality is fixed at 92, PNG output.
-- M4 onwards: not started.
+- M3: full-resolution tiled JPEG export works, with quality from the
+  settings. Missing: EXIF metadata is not copied yet, PNG output.
+- M5 (done before M4 at the owner's request), photos only:
+  - multi-select by picker, folder or drag and drop; queue with corrected
+    thumbnails; edit any item and apply its adjustments to all; run with
+    per-item and overall progress, cancel, retry of failed items, summary;
+  - settings: output mode, suffix, JPEG quality, skip already corrected;
+  - output: next to the source and overwrite through the File System Access
+    API (desktop Chrome / Edge), downloads elsewhere; an existing file is
+    never replaced silently; overwrite asks for confirmation per run;
+  - every JPEG UWCC writes carries a comment segment `UWCC corrected`, and
+    files with that marker or with the suffix in their name are skipped.
+  - Verified in a headless Chromium, with the origin-private file system
+    standing in for a user-picked folder. Not yet tried with the real system
+    pickers on a desktop browser.
+  - Missing: free-space check, resuming a queue after the page was closed,
+    sub-folders, videos (shown as "not supported yet").
+- M4, M6 onwards: not started.
 
 ## 10. Risks
 

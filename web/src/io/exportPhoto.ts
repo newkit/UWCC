@@ -1,6 +1,7 @@
 import type { Adjustments } from '../model';
 import { CorrectionRenderer, createWorkCanvas } from '../render/renderer';
 import { encodeJpeg } from '../worker/client';
+import { tagJpeg } from './jpegMarker';
 
 const TILE = 2048;
 
@@ -15,7 +16,11 @@ export async function exportPhoto(
   adjustments: Adjustments,
   quality: number,
   onProgress: (fraction: number, stage: 'render' | 'encode') => void,
+  signal?: AbortSignal,
 ): Promise<Blob> {
+  const checkCancelled = () => {
+    if (signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+  };
   const bitmap = await createImageBitmap(file);
   const renderer = new CorrectionRenderer(createWorkCanvas(TILE, TILE));
   try {
@@ -28,6 +33,7 @@ export async function exportPhoto(
     }
     const tile = new Uint8Array(TILE * TILE * 4);
     for (let y = 0; y < H; y += TILE) {
+      checkCancelled();
       for (let x = 0; x < W; x += TILE) {
         const w = Math.min(TILE, W - x), h = Math.min(TILE, H - y);
         const part = await createImageBitmap(bitmap, x, y, w, h);
@@ -43,28 +49,13 @@ export async function exportPhoto(
       onProgress(Math.min(1, (y + TILE) / H), 'render');
       await new Promise((resolve) => setTimeout(resolve)); // keep the page responsive
     }
+    checkCancelled();
     onProgress(0, 'encode');
     const jpeg = await encodeJpeg(pixels, W, H, quality);
-    return new Blob([jpeg], { type: 'image/jpeg' });
+    checkCancelled();
+    return tagJpeg(jpeg);
   } finally {
     renderer.dispose();
     bitmap.close();
   }
-}
-
-/** `GOPR0042.JPG` -> `GOPR0042_uwcc.jpg` */
-export function outputName(sourceName: string, suffix = '_uwcc'): string {
-  const base = sourceName.replace(/\.[^./\\]+$/, '');
-  return `${base}${suffix}.jpg`;
-}
-
-export function downloadBlob(blob: Blob, name: string) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = name;
-  document.body.append(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
