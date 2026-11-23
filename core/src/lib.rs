@@ -4,7 +4,7 @@
 //! A correction is a set of parameters for one per-pixel pipeline
 //! (`model::Correction`). Several methods can derive those parameters from a
 //! small copy of the image: UWCC's own (`analysis`), and re-implementations
-//! of published ones (`matrix`, `ancuti`, `seathru`). `reference` applies the
+//! of published ones (`matrix`, `ancuti`, `seathru`, `udcp`). `reference` applies the
 //! parameters on the CPU and is the ground truth for the GPU shader in the
 //! web app, which must implement exactly the same maths.
 //!
@@ -18,6 +18,7 @@ pub mod model;
 pub mod range;
 pub mod reference;
 pub mod seathru;
+pub mod udcp;
 mod wasm;
 
 pub use analysis::{analyze_linear, analyze_srgb8, Analysis};
@@ -45,6 +46,7 @@ pub fn analyze_with_range(
         Algorithm::Ancuti => ancuti::analyze(rgba),
         Algorithm::SeaThru => seathru::analyze(rgba, width, height),
         Algorithm::UwccAlways => analysis::analyze_srgb8_always(rgba),
+        Algorithm::Udcp => udcp::analyze(rgba, width, height),
         Algorithm::SeaThruDepth => match range {
             Some(map) => seathru::analyze_with_range(rgba, width, height, map),
             None => seathru::analyze(rgba, width, height),

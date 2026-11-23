@@ -390,6 +390,7 @@ pixel's range; apply a 3x4 matrix; then the manual adjustments as before.
 | Ancuti white balance | Ancuti, Ancuti, De Vleeschouwer, Bekaert: "Color Balance and Fusion for Underwater Image Enhancement", IEEE TIP 2018 | The white-balance stage: red compensation `r + (mean_g - mean_r)(1 - r) g`, blue compensation in green water, grey-world gains. On encoded values | The multi-scale fusion (gamma-corrected and sharpened inputs blended over Laplacian pyramids): spatial, not per-pixel |
 | Sea-thru (estimated range) | Akkaynak, Treibitz: "Sea-thru: A Method for Removing Water from Underwater Images", CVPR 2019 | The paper's image formation model and estimation steps: backscatter fitted to the darkest 1 % of pixels in ten range bins; illuminant by local space average colour among neighbours of similar range; attenuation coefficient as a two-term exponential of range; recovery and grey-world balance. In linear light | **The range map.** The paper measures range with stereo or structure from motion. UWCC has one image and estimates relative range from colour (below). Also: 8-bit JPEG or video instead of linear RAW; a simpler attenuation fit; caps on the gains. Listed at the top of `core/src/seathru.rs` |
 | Sea-thru (depth model) | The same, with range from a monocular depth network: Yang et al., "Depth Anything V2", 2024 (Small model, Apache-2.0) | As above, on a range map made from the network's output (below). Photos only | For video it falls back to the range estimated from colour: the network is too slow to run on every frame. The network gives relative depth, not metres |
+| UDCP haze removal | Drews Jr, do Nascimento, Moraes, Botelho, Campos: "Transmission Estimation in Underwater Single Images", ICCV Workshops 2013 | The underwater dark channel prior: transmission from the minimum of green and blue over a patch, relative to the water colour found where that minimum is brightest; recovery `(I - A) / max(t, 0.1) + A`. On encoded values. The map of the image holds the haze `1 - t` in place of range | The map is computed on a grid of at most 96 cells and blurred; the paper works at full resolution with image matting, so UWCC's map has soft edges. Water colour averaged over the brightest 0.1 %, not one pixel. Listed at the top of `core/src/udcp.rs` |
 
 **Estimated range** (`core/src/range.rs`). After the underwater light
 attenuation prior of Song et al. 2018: range grows with max(green, blue) and
@@ -425,6 +426,20 @@ with red absent the model has nothing to restore, and where the map says
 "far" (open water behind the dolphins) nearly everything is removed as
 backscatter and the remainder amplified, which gives dark, noisy water.
 That is the method's behaviour without a signal, not a fault of the depth.
+
+**UDCP results**, by eye: contrast comes back and the water turns a deeper
+blue, and as in the paper the colour cast stays, so it is a companion to the
+neutral picker more than a correction on its own. Two weaknesses show on the
+test images: a soft halo around near subjects in front of open water (the
+dolphins), from the coarse map; and bright sand, whose colour is close to
+the water colour, is read as haze and darkened (the clip). The second is a
+known limit of dark-channel methods. An export of the clip is steady over
+time.
+
+**The map in the pipeline.** Corrections that use the range step carry which
+map they read (`haze`) and, for the haze map, the water colour it is
+measured against, so the same analysed value is used for every frame of a
+clip. `RangeMap::for_correction` in the core returns the right map.
 
 **Range in the pipeline.** The map is a small float texture. The shader
 interpolates it by hand so that GPU and CPU agree, and export tiles pass
@@ -680,6 +695,7 @@ Status on 2026-11-23:
   CPU reference to within 1 of 255 on every branch of the pipeline, in a
   software-rendered browser. Verified headless on photos (including a
   multi-tile export) and on the owner's clip. Not verified on real GPUs.
+- UDCP haze removal (§6.7): done, verified headless on photos and the clip.
 - Sea-thru on a depth model (§6.7): done for photos, verified headless
   (model loaded on first use only, preview, export, batch, thumbnails).
   Not verified: speed and memory on phones.

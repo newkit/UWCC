@@ -35,7 +35,8 @@ const BLUR_PASSES: usize = 4;
 /// A map made from a depth model's output is at most this many cells on its longer side.
 pub const DEPTH_MAX: usize = 160;
 
-/// Relative range per grid cell, 0 (near) to 1 (far), rows top to bottom.
+/// One value per grid cell, rows top to bottom: relative range, 0 (near) to
+/// 1 (far); or for `udcp` the amount of haze, 0 (none) to 1 (only water).
 #[derive(Clone, Debug, PartialEq)]
 pub struct RangeMap {
     pub width: usize,
@@ -101,6 +102,15 @@ impl RangeMap {
             }
         }
         RangeMap { width: gw, height: gh, data }
+    }
+
+    /// The map the pipeline needs for correction `c`, estimated from the image itself.
+    pub fn for_correction(rgba: &[u8], width: usize, height: usize, c: &crate::model::Correction) -> RangeMap {
+        if c.haze {
+            crate::udcp::haze_map(rgba, width, height, c.airlight)
+        } else {
+            RangeMap::from_srgb8(rgba, width, height)
+        }
     }
 
     /// Range map from the output of a monocular depth model: relative

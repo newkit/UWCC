@@ -31,9 +31,12 @@ fn main() {
         let mut row = vec![small.to_vec()];
         for algorithm in Algorithm::ALL {
             let start = std::time::Instant::now();
-            let range = if algorithm == Algorithm::SeaThruDepth { depth.as_ref().unwrap_or(&map) } else { &map };
-            let analysis = analyze_with_range(algorithm, &small, w, h, Some(range));
+            let given = if algorithm == Algorithm::SeaThruDepth { depth.as_ref() } else { None };
+            let analysis = analyze_with_range(algorithm, &small, w, h, given);
             let elapsed = start.elapsed();
+            // The map the method works on: the one given, or the one estimated for its correction.
+            let own = RangeMap::for_correction(&small, w, h, &analysis.correction);
+            let range = given.unwrap_or(&own);
             let mut buf = small.to_vec();
             apply_rgba8(&mut buf, w, &analysis.correction, &Adjustments::default(), Some(range));
             println!("{path} {algorithm:?} {elapsed:.1?} {:?}", analysis.correction);

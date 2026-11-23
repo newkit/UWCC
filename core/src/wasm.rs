@@ -26,11 +26,14 @@ pub fn analyze(rgba: &[u8], width: u32, height: u32, algorithm: u32, range: &[f3
     out
 }
 
-/// Estimate the range map of an RGBA8 sRGB image. Returns its width and
-/// height in cells, then one value (0 near .. 1 far) per cell, rows top to bottom.
+/// Estimate the map the pipeline needs for `correction` (flat form) from an
+/// RGBA8 sRGB image: its range map, or for haze removal its haze map.
+/// Returns width and height in cells, then one value (0..1) per cell, rows
+/// top to bottom.
 #[wasm_bindgen]
-pub fn range_map(rgba: &[u8], width: u32, height: u32) -> Vec<f32> {
-    RangeMap::from_srgb8(rgba, width as usize, height as usize).to_flat()
+pub fn range_map(rgba: &[u8], width: u32, height: u32, correction: &[f32]) -> Vec<f32> {
+    let c = if correction.len() < CORRECTION_LEN { Correction::IDENTITY } else { Correction::from_array(correction) };
+    RangeMap::for_correction(rgba, width as usize, height as usize, &c).to_flat()
 }
 
 /// Range map from a depth model's output (relative inverse depth, larger =

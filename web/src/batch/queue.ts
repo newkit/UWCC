@@ -106,7 +106,7 @@ export async function renderThumb(job: Pick<Job, 'thumbSource' | 'analysis' | 'v
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
   ctx.drawImage(image, 0, 0);
   const pixels = new Uint8Array(ctx.getImageData(0, 0, canvas.width, canvas.height).data.buffer);
-  const range = usesRange(correction) ? fixedRange(job) ?? await rangeMap(pixels, canvas.width, canvas.height) : undefined;
+  const range = usesRange(correction) ? fixedRange(job) ?? await rangeMap(pixels, canvas.width, canvas.height, correction) : undefined;
   const corrected = await applyReference(pixels, canvas.width, packParams(correction, job.adjustments), range);
   ctx.putImageData(new ImageData(new Uint8ClampedArray(corrected), canvas.width, canvas.height), 0, 0);
   return canvas.toDataURL('image/jpeg', 0.8);

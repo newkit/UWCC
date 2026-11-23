@@ -48,7 +48,7 @@ export async function pickNeutral(
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(source, x, y, Math.min(side, width), Math.min(side, height), 0, 0, out, out);
   const patch = new Uint8Array(ctx.getImageData(0, 0, out, out).data.buffer);
-  const range = usesRange(correction) ? sampleRange(fixedRange ?? await rangeMapOf(source, width, height), u, v) : 0.5;
+  const range = usesRange(correction) ? sampleRange(fixedRange ?? await rangeMapOf(source, width, height, correction), u, v) : 0.5;
   const gains = await neutralGains(patch, correction, strength, range);
   if (gains.length !== 3) throw new Error('That spot is too dark or too bright to read its colour. Pick another one.');
   return [gains[0], gains[1], gains[2]];

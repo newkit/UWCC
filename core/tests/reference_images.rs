@@ -106,14 +106,14 @@ fn every_method_gives_a_sane_result() {
     use uwcc_core::{analyze, Algorithm, RangeMap};
     for name in ["turtle_before.jpg", "dolphins_before.jpg", "coral_before.jpg", "coral_flash.jpg"] {
         let (before, w, h) = load(name);
-        let map = RangeMap::from_srgb8(&before, w as usize, h as usize);
-        assert!(map.data.iter().all(|v| (0.0..=1.0).contains(v)), "{name}: range map out of bounds");
         for algorithm in Algorithm::ALL {
             let analysis = analyze(algorithm, &before, w as usize, h as usize);
             assert!(
                 analysis.correction.to_array().iter().all(|v| v.is_finite()),
                 "{name} {algorithm:?}: parameters not finite"
             );
+            let map = RangeMap::for_correction(&before, w as usize, h as usize, &analysis.correction);
+            assert!(map.data.iter().all(|v| (0.0..=1.0).contains(v)), "{name} {algorithm:?}: map out of bounds");
             let mut out = before.clone();
             apply_rgba8(&mut out, w as usize, &analysis.correction, &Adjustments::default(), Some(&map));
             let mean = out.as_chunks::<4>().0.iter().map(|p| p[0] as f64 + p[1] as f64 + p[2] as f64).sum::<f64>()

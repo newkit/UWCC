@@ -18,7 +18,7 @@ for mobile with Capacitor. Progress per milestone is listed at the end of
 
 ## Layout
 
-- `core/` - Rust crate `uwcc-core`: parameter model, CPU reference implementation, WASM bindings, and one module per correction method: `analysis` (UWCC's own, the default; also its always-applied variant), `matrix`, `ancuti`, `seathru` (with `range`, the estimated range map it needs). `examples/sheet.rs` renders all methods side by side.
+- `core/` - Rust crate `uwcc-core`: parameter model, CPU reference implementation, WASM bindings, and one module per correction method: `analysis` (UWCC's own, the default; also its always-applied variant), `matrix`, `ancuti`, `seathru` (with `range`, the estimated range map it needs), `udcp` (with its haze map). `examples/sheet.rs` renders all methods side by side.
 - `web/` - the app: React + TypeScript + Vite. `src/render/` shader and renderer, `src/worker/` WASM core and JPEG encoder off the main thread, `src/io/` sources, import, export and output targets, `src/batch/` the job queue, `src/depth/` the depth model for the Sea-thru variant that uses one (loaded on demand, in its own worker; fetched into `public/models/` by `scripts/fetch-model.mjs`, not committed), `src/video/` clip analysis and WebCodecs export (loaded on demand; keep `mediabunny` imports inside `video.ts`), `src/settings/` persisted settings, `src/ui/` components.
 - `spike/m0/` - throwaway device test page for M0. Do not build the app on it.
 - `testdata/photos/` - reference pairs used by the core's tests and as in-app samples. `testdata/local/` is git-ignored.

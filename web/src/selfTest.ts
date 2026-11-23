@@ -3,12 +3,15 @@
 // Exposed for automated checks: `await window.uwccSelfTest()`.
 
 import { type Adjustments, CORRECTION_LEN, RANGE_NODES, packParams, usesRange } from './model';
+
+/** Position of the ranged flag in a correction; the haze flag and the airlight follow. */
+const RANGED_AT = 15 + 6 * RANGE_NODES;
 import { CorrectionRenderer, createWorkCanvas } from './render/renderer';
 import { applyReference, rangeMap } from './worker/client';
 
 export type SelfTestResult = { maxDiff: number; meanDiff: number; pixels: number; cases: Record<string, number> };
 
-function correction(matrix: number[], rest: { encoded?: boolean; comp?: number[]; backscatter?: number[]; logGain?: number[] } = {}): Float32Array {
+function correction(matrix: number[], rest: { encoded?: boolean; comp?: number[]; backscatter?: number[]; logGain?: number[]; airlight?: number[] } = {}): Float32Array {
   const c = new Float32Array(CORRECTION_LEN);
   c.set(matrix);
   c[12] = rest.encoded ? 1 : 0;
@@ -16,7 +19,8 @@ function correction(matrix: number[], rest: { encoded?: boolean; comp?: number[]
   if (rest.backscatter && rest.logGain) {
     c.set(rest.backscatter, 15);
     c.set(rest.logGain, 15 + 3 * RANGE_NODES);
-    c[CORRECTION_LEN - 1] = 1;
+    c[RANGED_AT] = 1;
+    if (rest.airlight) c.set([1, ...rest.airlight], RANGED_AT + 1);
   }
   return c;
 }
@@ -31,6 +35,13 @@ const CASES: Record<string, Float32Array> = {
     backscatter: Array.from({ length: 3 * RANGE_NODES }, (_, i) => 0.004 * (i % RANGE_NODES) * (1 + Math.floor(i / RANGE_NODES))),
     logGain: Array.from({ length: 3 * RANGE_NODES }, (_, i) => 0.25 * (i % RANGE_NODES) / (1 + Math.floor(i / RANGE_NODES)) + 0.1),
   }),
+  // As UDCP produces: on encoded values, reading the haze map.
+  haze: correction([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0], {
+    encoded: true,
+    airlight: [0.6, 0.8],
+    backscatter: [0.1, 0.6, 0.8].flatMap((a) => Array.from({ length: RANGE_NODES }, (_, i) => a * Math.min(i / (RANGE_NODES - 1), 0.9))),
+    logGain: Array.from({ length: 3 * RANGE_NODES }, (_, i) => -Math.log(Math.max(1 - (i % RANGE_NODES) / (RANGE_NODES - 1), 0.1))),
+  }),
 };
 
 export async function selfTest(): Promise<SelfTestResult> {
@@ -42,19 +53,19 @@ export async function selfTest(): Promise<SelfTestResult> {
     source.set([(x * y) % 256 >> 2, (x * 4 + y) % 256, (y * 4 + x * 3) % 256, 255], i * 4);
   }
   const adjustments: Adjustments = { strength: 0.9, temperature: 0.2, tint: -0.1, exposure: 0.3, contrast: 0.15, saturation: 0.2, neutral: [1.3, 0.9, 0.8] };
-  const range = await rangeMap(new Uint8Array(source), size, size);
 
   const renderer = new CorrectionRenderer(createWorkCanvas(size, size));
   renderer.setSource(new ImageData(source, size, size), size, size);
-  renderer.setRange(range);
   const bottomUp = new Uint8Array(size * size * 4);
   const cases: Record<string, number> = {};
   let maxDiff = 0, sum = 0;
   try {
     for (const [name, params] of Object.entries(CASES)) {
+      const range = usesRange(params) ? await rangeMap(new Uint8Array(source), size, size, params) : undefined;
+      if (range) renderer.setRange(range);
       renderer.draw(params, adjustments);
       renderer.readPixels(size, size, bottomUp);
-      const reference = await applyReference(new Uint8Array(source), size, packParams(params, adjustments), usesRange(params) ? range : undefined);
+      const reference = await applyReference(new Uint8Array(source), size, packParams(params, adjustments), range);
       let worst = 0;
       for (let y = 0; y < size; y++) {
         for (let x = 0; x < size; x++) {

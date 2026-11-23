@@ -25,6 +25,7 @@ const METHOD_NOTES: Record<Exclude<Algorithm, 'uwcc'>, string> = {
   ancuti: 'White balance after Ancuti et al. (2018): adds red where there is green, then balances the channels to grey. Always applies in full.',
   uwccAlways: 'UWCC\'s own correction without its check for a colour cast: applied in full even where the colours already look natural. Use it when the automatic choice leaves a file uncorrected.',
   seathruDepth: 'The Sea-thru model (Akkaynak and Treibitz, 2019) with distance from a depth-estimation network (Depth Anything V2 Small) that runs on this device. Experimental. Open water far away can turn dark and noisy.',
+  udcp: 'Haze removal by the underwater dark channel prior (Drews et al., 2013). It restores contrast only; the colour cast stays, so combine it with "Pick neutral" or the temperature control. Near objects in front of open water can show a faint halo.',
   seathru: 'The Sea-thru model (Akkaynak and Treibitz, 2019): removes haze and restores colour by distance. The distance is estimated from the image, because no depth map is available. Experimental; it needs some red left in the footage.',
 };
 

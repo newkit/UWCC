@@ -7,7 +7,7 @@ import init, { analyze, apply_reference, neutral_gains, range_from_disparity, ra
 export type Request =
   | { id: number; type: 'analyze'; rgba: Uint8Array; width: number; height: number; algorithms: number[]; range: Float32Array }
   | { id: number; type: 'rangeFromDisparity'; disparity: Float32Array; width: number; height: number }
-  | { id: number; type: 'rangeMap'; rgba: Uint8Array; width: number; height: number }
+  | { id: number; type: 'rangeMap'; rgba: Uint8Array; width: number; height: number; correction: Float32Array }
   | { id: number; type: 'neutral'; patch: Uint8Array; correction: Float32Array; strength: number; range: number }
   | { id: number; type: 'reference'; rgba: Uint8Array; width: number; params: Float32Array; range: Float32Array }
   | { id: number; type: 'encodeJpeg'; rgba: Uint8ClampedArray; width: number; height: number; quality: number };
@@ -27,7 +27,7 @@ self.onmessage = async (event: MessageEvent<Request>) => {
     } else if (msg.type === 'rangeFromDisparity') {
       result = range_from_disparity(msg.disparity, msg.width, msg.height);
     } else if (msg.type === 'rangeMap') {
-      result = range_map(msg.rgba, msg.width, msg.height);
+      result = range_map(msg.rgba, msg.width, msg.height, msg.correction);
     } else if (msg.type === 'neutral') {
       result = neutral_gains(msg.patch, msg.correction, msg.strength, msg.range);
     } else if (msg.type === 'reference') {

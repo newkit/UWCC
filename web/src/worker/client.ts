@@ -61,9 +61,9 @@ export function rangeFromDisparity(disparity: Float32Array, width: number, heigh
   return call<Float32Array>({ type: 'rangeFromDisparity', disparity, width, height });
 }
 
-/** Range map of a small RGBA copy: width, height, then one value per cell. */
-export function rangeMap(rgba: Uint8Array, width: number, height: number): Promise<Float32Array> {
-  return call<Float32Array>({ type: 'rangeMap', rgba, width, height });
+/** The map `correction` needs (range, or haze), from a small RGBA copy: width, height, then one value per cell. */
+export function rangeMap(rgba: Uint8Array, width: number, height: number, correction: Float32Array): Promise<Float32Array> {
+  return call<Float32Array>({ type: 'rangeMap', rgba, width, height, correction });
 }
 
 /** Gains that turn a patch of the source grey after the given correction; empty when the patch is unusable. */

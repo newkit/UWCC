@@ -34,7 +34,7 @@ export async function exportPhoto(
     } catch {
       throw new Error('Not enough memory to export this photo at full resolution on this device.');
     }
-    if (usesRange(correction)) renderer.setRange(range ?? await rangeMapOf(bitmap, W, H));
+    if (usesRange(correction)) renderer.setRange(range ?? await rangeMapOf(bitmap, W, H, correction));
     const tile = new Uint8Array(TILE * TILE * 4);
     for (let y = 0; y < H; y += TILE) {
       checkCancelled();

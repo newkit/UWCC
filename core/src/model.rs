@@ -15,16 +15,19 @@ pub enum Algorithm {
     UwccAlways = 4,
     /// Sea-thru on a range map from a depth model, supplied by the caller (`seathru`).
     SeaThruDepth = 5,
+    /// Haze removal by the underwater dark channel prior of Drews et al. 2013 (`udcp`).
+    Udcp = 6,
 }
 
 impl Algorithm {
-    pub const ALL: [Algorithm; 6] = [
+    pub const ALL: [Algorithm; 7] = [
         Algorithm::Uwcc,
         Algorithm::Matrix,
         Algorithm::Ancuti,
         Algorithm::SeaThru,
         Algorithm::UwccAlways,
         Algorithm::SeaThruDepth,
+        Algorithm::Udcp,
     ];
 
     pub fn from_id(id: u32) -> Option<Algorithm> {
@@ -37,7 +40,7 @@ impl Algorithm {
 pub const RANGE_NODES: usize = 8;
 
 /// Number of values in the flat form of a [`Correction`].
-pub const CORRECTION_LEN: usize = 16 + 6 * RANGE_NODES;
+pub const CORRECTION_LEN: usize = 19 + 6 * RANGE_NODES;
 
 /// Automatic correction: the parameters of the per-pixel pipeline in
 /// `reference`. Every method fills in the part it needs and leaves the rest
@@ -47,7 +50,8 @@ pub const CORRECTION_LEN: usize = 16 + 6 * RANGE_NODES;
 ///
 /// 1. take the pixel sRGB-encoded (`encoded`) or in linear light;
 /// 2. channel compensation: `r += comp[0] * (1 - r) * g`, `b += comp[1] * (1 - b) * g`;
-/// 3. if `ranged`: remove backscatter and undo attenuation as functions of the pixel's range;
+/// 3. if `ranged`: remove backscatter and undo attenuation as functions of the pixel's value
+///    in a map of the image: its range, or with `haze` the amount of haze over it;
 /// 4. the affine transform `m`, clamped at zero.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Correction {
@@ -67,8 +71,12 @@ pub struct Correction {
     pub backscatter: [[f32; RANGE_NODES]; 3],
     /// Per channel: natural logarithm of the gain that undoes attenuation, tabulated over range.
     pub log_gain: [[f32; RANGE_NODES]; 3],
-    /// Step 3 is active; the pipeline needs a range map.
+    /// Step 3 is active; the pipeline needs a map of the image (`RangeMap::for_correction`).
     pub ranged: bool,
+    /// The map step 3 reads is the haze map of `udcp`, not the range map.
+    pub haze: bool,
+    /// For the haze map: the water colour (green, blue; encoded) the dark channel is measured against.
+    pub airlight: [f32; 2],
 }
 
 impl Correction {
@@ -84,6 +92,8 @@ impl Correction {
             backscatter: [[0.0; RANGE_NODES]; 3],
             log_gain: [[0.0; RANGE_NODES]; 3],
             ranged: false,
+            haze: false,
+            airlight: [0.0; 2],
         }
     }
 
@@ -107,7 +117,7 @@ impl Correction {
     }
 
     /// Flat form: matrix (12, row-major), encoded flag, compensation (2),
-    /// backscatter (3 x `RANGE_NODES`), log gain (3 x `RANGE_NODES`), ranged flag.
+    /// backscatter (3 x `RANGE_NODES`), log gain (3 x `RANGE_NODES`), ranged flag, haze flag, airlight (2).
     pub fn to_array(&self) -> [f32; CORRECTION_LEN] {
         let mut a = [0.0; CORRECTION_LEN];
         for r in 0..3 {
@@ -118,7 +128,9 @@ impl Correction {
         }
         a[12] = self.encoded as u8 as f32;
         a[13..15].copy_from_slice(&self.comp);
-        a[CORRECTION_LEN - 1] = self.ranged as u8 as f32;
+        a[CORRECTION_LEN - 4] = self.ranged as u8 as f32;
+        a[CORRECTION_LEN - 3] = self.haze as u8 as f32;
+        a[CORRECTION_LEN - 2..].copy_from_slice(&self.airlight);
         a
     }
 
@@ -133,7 +145,9 @@ impl Correction {
         }
         c.encoded = a[12] > 0.5;
         c.comp.copy_from_slice(&a[13..15]);
-        c.ranged = a[CORRECTION_LEN - 1] > 0.5;
+        c.ranged = a[CORRECTION_LEN - 4] > 0.5;
+        c.haze = a[CORRECTION_LEN - 3] > 0.5;
+        c.airlight.copy_from_slice(&a[CORRECTION_LEN - 2..CORRECTION_LEN]);
         c
     }
 }

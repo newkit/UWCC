@@ -179,7 +179,7 @@ export async function exportVideo(
             const w = frame.displayWidth, h = frame.displayHeight;
             const correction = correctionAt(keys, sample.timestamp - start);
             // The range map is the only step that waits; everything on the shared renderer happens after it, in one go.
-            const range = usesRange(correction) ? await rangeMapOf(frame, w, h) : null;
+            const range = usesRange(correction) ? await rangeMapOf(frame, w, h, correction) : null;
             renderer ??= new CorrectionRenderer(createWorkCanvas(w, h));
             if (range) renderer.setRange(range);
             renderer.setSource(frame, w, h);
