@@ -2,16 +2,16 @@
 // once for every branch of the per-pixel pipeline.
 // Exposed for automated checks: `await window.uwccSelfTest()`.
 
-import { type Adjustments, CORRECTION_LEN, RANGE_NODES, packParams, usesRange } from './model';
+import { type Adjustments, CORRECTION_LEN, FUSION_AT, RANGE_NODES, packParams } from './model';
 
 /** Position of the ranged flag in a correction; the haze flag and the airlight follow. */
 const RANGED_AT = 15 + 6 * RANGE_NODES;
 import { CorrectionRenderer, createWorkCanvas } from './render/renderer';
-import { applyReference, rangeMap } from './worker/client';
+import { applyReference, mapsFromPixels } from './worker/client';
 
 export type SelfTestResult = { maxDiff: number; meanDiff: number; pixels: number; cases: Record<string, number> };
 
-function correction(matrix: number[], rest: { encoded?: boolean; comp?: number[]; backscatter?: number[]; logGain?: number[]; airlight?: number[] } = {}): Float32Array {
+function correction(matrix: number[], rest: { encoded?: boolean; comp?: number[]; backscatter?: number[]; logGain?: number[]; airlight?: number[]; fusion?: number[] } = {}): Float32Array {
   const c = new Float32Array(CORRECTION_LEN);
   c.set(matrix);
   c[12] = rest.encoded ? 1 : 0;
@@ -22,6 +22,8 @@ function correction(matrix: number[], rest: { encoded?: boolean; comp?: number[]
     c[RANGED_AT] = 1;
     if (rest.airlight) c.set([1, ...rest.airlight], RANGED_AT + 1);
   }
+  // Fusion flag, gamma, sharpen shift and scale; neutral values when the step is off.
+  c.set(rest.fusion ? [1, ...rest.fusion] : [0, 1, 0, 1], FUSION_AT);
   return c;
 }
 
@@ -42,6 +44,8 @@ const CASES: Record<string, Float32Array> = {
     backscatter: [0.1, 0.6, 0.8].flatMap((a) => Array.from({ length: RANGE_NODES }, (_, i) => a * Math.min(i / (RANGE_NODES - 1), 0.9))),
     logGain: Array.from({ length: 3 * RANGE_NODES }, (_, i) => -Math.log(Math.max(1 - (i % RANGE_NODES) / (RANGE_NODES - 1), 0.1))),
   }),
+  // As Ancuti's method with fusion produces.
+  fusion: correction([1.6, 0, 0, 0, 0, 0.9, 0, 0, 0, 0, 0.8, 0], { encoded: true, comp: [0.3, 0], fusion: [1.5, -0.2, 2.5] }),
 };
 
 export async function selfTest(): Promise<SelfTestResult> {
@@ -61,11 +65,11 @@ export async function selfTest(): Promise<SelfTestResult> {
   let maxDiff = 0, sum = 0;
   try {
     for (const [name, params] of Object.entries(CASES)) {
-      const range = usesRange(params) ? await rangeMap(new Uint8Array(source), size, size, params) : undefined;
-      if (range) renderer.setRange(range);
+      const maps = await mapsFromPixels(new Uint8Array(source), size, size, params);
+      renderer.setMaps(maps);
       renderer.draw(params, adjustments);
       renderer.readPixels(size, size, bottomUp);
-      const reference = await applyReference(new Uint8Array(source), size, packParams(params, adjustments), range);
+      const reference = await applyReference(new Uint8Array(source), size, packParams(params, adjustments), maps);
       let worst = 0;
       for (let y = 0; y < size; y++) {
         for (let x = 0; x < size; x++) {

@@ -1,4 +1,5 @@
-import { ALGORITHMS, type Algorithm, type Analyses, type Analysis, analysisFromArray, usesDepthModel } from '../model';
+import { ALGORITHMS, type Algorithm, type Analyses, type Analysis, analysisFromArray, usesDepthModel, usesFusion, usesRange } from '../model';
+import type { FrameMaps } from '../render/renderer';
 import type { Request, Response } from './core.worker';
 
 let worker: Worker | null = null;
@@ -66,14 +67,28 @@ export function rangeMap(rgba: Uint8Array, width: number, height: number, correc
   return call<Float32Array>({ type: 'rangeMap', rgba, width, height, correction });
 }
 
-/** Gains that turn a patch of the source grey after the given correction; empty when the patch is unusable. */
-export function neutralGains(patch: Uint8Array, correction: Float32Array, strength: number, range: number): Promise<Float32Array> {
-  return call<Float32Array>({ type: 'neutral', patch, correction, strength, range });
+/**
+ * The maps `correction` needs, from a small RGBA copy of the image.
+ * `fixedRange` is used in place of the estimated range map when given.
+ */
+export async function mapsFromPixels(rgba: Uint8Array, width: number, height: number, correction: Float32Array, fixedRange?: Float32Array): Promise<FrameMaps> {
+  const maps: FrameMaps = {};
+  if (usesRange(correction)) maps.range = fixedRange ?? await rangeMap(rgba, width, height, correction);
+  if (usesFusion(correction)) maps.fusion = await call<Float32Array>({ type: 'fusionMaps', rgba, width, height, correction });
+  return maps;
+}
+
+/**
+ * Gains that turn a patch of the source grey after the given correction; empty when the patch is unusable.
+ * The patch lies at (u, v), 0..1 from the top left of the image the maps belong to.
+ */
+export function neutralGains(patch: Uint8Array, correction: Float32Array, strength: number, u: number, v: number, maps: FrameMaps): Promise<Float32Array> {
+  return call<Float32Array>({ type: 'neutral', patch, correction, strength, u, v, range: maps.range ?? NO_RANGE, fusion: maps.fusion ?? NO_RANGE });
 }
 
 /** CPU reference implementation; used for thumbnails and to check the shader. */
-export function applyReference(rgba: Uint8Array, width: number, params: Float32Array, range: Float32Array = NO_RANGE): Promise<Uint8Array> {
-  return call<Uint8Array>({ type: 'reference', rgba, width, params, range });
+export function applyReference(rgba: Uint8Array, width: number, params: Float32Array, maps: FrameMaps = {}): Promise<Uint8Array> {
+  return call<Uint8Array>({ type: 'reference', rgba, width, params, range: maps.range ?? NO_RANGE, fusion: maps.fusion ?? NO_RANGE });
 }
 
 /** Encode RGBA pixels as JPEG. The pixel buffer is transferred and no longer usable afterwards. */

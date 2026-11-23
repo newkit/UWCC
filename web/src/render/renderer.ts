@@ -1,4 +1,7 @@
-import { type Adjustments, RANGE_NODES, shaderValues } from '../model';
+import { type Adjustments, FUSION_AT, RANGE_NODES, shaderValues } from '../model';
+
+/** The maps of the image a correction may need, each in the flat form the core returns. */
+export type FrameMaps = { range?: Float32Array; fusion?: Float32Array };
 import { FRAGMENT, VERTEX } from './shader';
 
 type AnyCanvas = HTMLCanvasElement | OffscreenCanvas;
@@ -11,6 +14,8 @@ export class CorrectionRenderer {
   private texture: WebGLTexture;
   private rangeTexture: WebGLTexture;
   private rangeSize: [number, number] = [1, 1];
+  private fusionTextures: [WebGLTexture, WebGLTexture];
+  private fusionSize: [number, number] | null = null;
 
   constructor(canvas: AnyCanvas) {
     const gl = canvas.getContext('webgl2', { alpha: false, antialias: false, preserveDrawingBuffer: true }) as WebGL2RenderingContext | null;
@@ -38,6 +43,7 @@ export class CorrectionRenderer {
 
     for (const name of [
       'u_tex', 'u_encoded', 'u_comp', 'u_ranged', 'u_backscatter', 'u_logGain', 'u_range', 'u_rangeSize', 'u_rangeRect',
+      'u_fusion', 'u_gamma', 'u_sharpen', 'u_fusionA', 'u_fusionB', 'u_fusionSize',
       'u_matrix', 'u_offset', 'u_strength', 'u_whiteBalance', 'u_exposure', 'u_contrast', 'u_saturation', 'u_split',
     ]) {
       this.uniforms[name] = gl.getUniformLocation(program, name);
@@ -59,8 +65,40 @@ export class CorrectionRenderer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.uniform1i(this.uniforms.u_range, 1);
+    // The two fusion maps live in units 2 and 3.
+    this.fusionTextures = [gl.createTexture()!, gl.createTexture()!];
+    this.fusionTextures.forEach((texture, i) => {
+      gl.activeTexture(gl.TEXTURE2 + i);
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, 1, 1, 0, gl.RGBA, gl.FLOAT, new Float32Array(4));
+    });
+    gl.uniform1i(this.uniforms.u_fusionA, 2);
+    gl.uniform1i(this.uniforms.u_fusionB, 3);
     gl.activeTexture(gl.TEXTURE0);
     this.setRange(new Float32Array([1, 1, 0.5]));
+  }
+
+  /** Set the maps of the image for corrections that need them. Maps not given keep their previous content. */
+  setMaps(maps: FrameMaps) {
+    if (maps.range) this.setRange(maps.range);
+    if (maps.fusion) this.setFusion(maps.fusion);
+  }
+
+  /** Set the fusion maps: width, height, then two blocks of four values per cell (as the core returns them). */
+  setFusion(maps: Float32Array) {
+    const gl = this.gl;
+    const width = maps[0], height = maps[1], block = width * height * 4;
+    this.fusionTextures.forEach((texture, i) => {
+      gl.activeTexture(gl.TEXTURE2 + i);
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, width, height, 0, gl.RGBA, gl.FLOAT, maps.subarray(2 + i * block, 2 + (i + 1) * block));
+    });
+    gl.activeTexture(gl.TEXTURE0);
+    this.fusionSize = [width, height];
   }
 
   /** Set the range map for corrections that need one: width, height, then one value per cell (as the core returns it). */
@@ -111,6 +149,11 @@ export class CorrectionRenderer {
     gl.uniform1f(u.u_ranged, c[15 + 2 * tables]);
     gl.uniform2f(u.u_rangeSize, ...this.rangeSize);
     gl.uniform4f(u.u_rangeRect, ...rect);
+    // Without fusion maps the step is skipped, as in the core's reference.
+    gl.uniform1f(u.u_fusion, this.fusionSize ? c[FUSION_AT] : 0);
+    gl.uniform1f(u.u_gamma, c[FUSION_AT + 1]);
+    gl.uniform2f(u.u_sharpen, c[FUSION_AT + 2], c[FUSION_AT + 3]);
+    gl.uniform2f(u.u_fusionSize, ...(this.fusionSize ?? [1, 1]));
     const values = shaderValues(adjustments);
     gl.uniform1f(u.u_strength, adjustments.strength);
     gl.uniform3f(u.u_whiteBalance, ...values.whiteBalance);

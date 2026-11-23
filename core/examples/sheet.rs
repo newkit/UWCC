@@ -8,7 +8,7 @@
 //! u32, then one f32 per pixel, larger = nearer); otherwise it falls back to
 //! the range estimated from colour, like the app does for video.
 
-use uwcc_core::reference::apply_rgba8;
+use uwcc_core::reference::apply_rgba8_with;
 use uwcc_core::{analyze_with_range, Adjustments, Algorithm, RangeMap};
 
 const WIDTH: u32 = 256;
@@ -38,7 +38,8 @@ fn main() {
             let own = RangeMap::for_correction(&small, w, h, &analysis.correction);
             let range = given.unwrap_or(&own);
             let mut buf = small.to_vec();
-            apply_rgba8(&mut buf, w, &analysis.correction, &Adjustments::default(), Some(range));
+            let fusion = uwcc_core::fusion::maps(&small, w, h, &analysis.correction);
+            apply_rgba8_with(&mut buf, w, &analysis.correction, &Adjustments::default(), Some(range), Some(&fusion));
             println!("{path} {algorithm:?} {elapsed:.1?} {:?}", analysis.correction);
             row.push(buf);
         }

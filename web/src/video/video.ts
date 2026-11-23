@@ -6,8 +6,8 @@ import {
   ALL_FORMATS, BlobSource, BufferTarget, Conversion, ConversionCanceledError, Input, Mp4OutputFormat, Output,
   QUALITY_HIGH, StreamTarget, type StreamTargetChunk, VideoSampleSink, canEncodeVideo, type VideoCodec,
 } from 'mediabunny';
-import { ALGORITHMS, type Adjustments, type Algorithm, type Analyses, usesRange } from '../model';
-import { rangeMapOf } from '../render/range';
+import { ALGORITHMS, type Adjustments, type Algorithm, type Analyses, usesMaps } from '../model';
+import { frameMapsOf } from '../render/range';
 import { CorrectionRenderer, createWorkCanvas } from '../render/renderer';
 import { TEMP_PREFIX } from '../io/tempFiles';
 import { correctionAt, type VideoKeys } from './keys';
@@ -178,10 +178,10 @@ export async function exportVideo(
           try {
             const w = frame.displayWidth, h = frame.displayHeight;
             const correction = correctionAt(keys, sample.timestamp - start);
-            // The range map is the only step that waits; everything on the shared renderer happens after it, in one go.
-            const range = usesRange(correction) ? await rangeMapOf(frame, w, h, correction) : null;
+            // The maps are the only step that waits; everything on the shared renderer happens after it, in one go.
+            const maps = usesMaps(correction) ? await frameMapsOf(frame, w, h, correction) : null;
             renderer ??= new CorrectionRenderer(createWorkCanvas(w, h));
-            if (range) renderer.setRange(range);
+            if (maps) renderer.setMaps(maps);
             renderer.setSource(frame, w, h);
             renderer.draw(correction, adjustments);
             return renderer.canvas;

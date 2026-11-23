@@ -6,10 +6,10 @@ import { loadAnalysisCopy, resizedPixels } from '../io/importPhoto';
 import { isTaggedJpeg } from '../io/jpegMarker';
 import { deliver, isProcessedName, type WriteResult } from '../io/output';
 import type { Source } from '../io/sources';
-import { type Adjustments, type Algorithm, type Analyses, type Analysis, CONTROLS, DEFAULT_ADJUSTMENTS, DEFAULT_ALGORITHM, packParams, usesDepthModel, usesRange } from '../model';
+import { type Adjustments, type Algorithm, type Analyses, type Analysis, CONTROLS, DEFAULT_ADJUSTMENTS, DEFAULT_ALGORITHM, packParams, usesDepthModel } from '../model';
 import type { Settings } from '../settings/settings';
 import type { VideoMeta } from '../video/video';
-import { analyze, analyzeWithRange, applyReference, rangeMap } from '../worker/client';
+import { analyze, analyzeWithRange, applyReference, mapsFromPixels } from '../worker/client';
 
 export type JobStatus =
   | 'analyzing'   // waiting for or running the automatic analysis
@@ -106,8 +106,8 @@ export async function renderThumb(job: Pick<Job, 'thumbSource' | 'analysis' | 'v
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
   ctx.drawImage(image, 0, 0);
   const pixels = new Uint8Array(ctx.getImageData(0, 0, canvas.width, canvas.height).data.buffer);
-  const range = usesRange(correction) ? fixedRange(job) ?? await rangeMap(pixels, canvas.width, canvas.height, correction) : undefined;
-  const corrected = await applyReference(pixels, canvas.width, packParams(correction, job.adjustments), range);
+  const maps = await mapsFromPixels(pixels, canvas.width, canvas.height, correction, fixedRange(job));
+  const corrected = await applyReference(pixels, canvas.width, packParams(correction, job.adjustments), maps);
   ctx.putImageData(new ImageData(new Uint8ClampedArray(corrected), canvas.width, canvas.height), 0, 0);
   return canvas.toDataURL('image/jpeg', 0.8);
 }

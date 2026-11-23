@@ -17,10 +17,12 @@ pub enum Algorithm {
     SeaThruDepth = 5,
     /// Haze removal by the underwater dark channel prior of Drews et al. 2013 (`udcp`).
     Udcp = 6,
+    /// Ancuti et al. 2018 with its fusion stage (`ancuti`, `fusion`).
+    AncutiFusion = 7,
 }
 
 impl Algorithm {
-    pub const ALL: [Algorithm; 7] = [
+    pub const ALL: [Algorithm; 8] = [
         Algorithm::Uwcc,
         Algorithm::Matrix,
         Algorithm::Ancuti,
@@ -28,6 +30,7 @@ impl Algorithm {
         Algorithm::UwccAlways,
         Algorithm::SeaThruDepth,
         Algorithm::Udcp,
+        Algorithm::AncutiFusion,
     ];
 
     pub fn from_id(id: u32) -> Option<Algorithm> {
@@ -40,7 +43,7 @@ impl Algorithm {
 pub const RANGE_NODES: usize = 8;
 
 /// Number of values in the flat form of a [`Correction`].
-pub const CORRECTION_LEN: usize = 19 + 6 * RANGE_NODES;
+pub const CORRECTION_LEN: usize = 23 + 6 * RANGE_NODES;
 
 /// Automatic correction: the parameters of the per-pixel pipeline in
 /// `reference`. Every method fills in the part it needs and leaves the rest
@@ -52,7 +55,9 @@ pub const CORRECTION_LEN: usize = 19 + 6 * RANGE_NODES;
 /// 2. channel compensation: `r += comp[0] * (1 - r) * g`, `b += comp[1] * (1 - b) * g`;
 /// 3. if `ranged`: remove backscatter and undo attenuation as functions of the pixel's value
 ///    in a map of the image: its range, or with `haze` the amount of haze over it;
-/// 4. the affine transform `m`, clamped at zero.
+/// 4. the affine transform `m`, clamped at zero;
+/// 5. if `fusion`: blend a gamma-corrected and a sharpened version of the result, using
+///    weights and low-frequency parts from maps of the image (`fusion::FusionMaps`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Correction {
     /// `m[row]` is `[from_r, from_g, from_b, offset]` for the output channel `row`.
@@ -77,6 +82,13 @@ pub struct Correction {
     pub haze: bool,
     /// For the haze map: the water colour (green, blue; encoded) the dark channel is measured against.
     pub airlight: [f32; 2],
+    /// Step 5 is active; the pipeline needs fusion maps of the image.
+    pub fusion: bool,
+    /// Step 5: exponent of the gamma-corrected input.
+    pub gamma: f32,
+    /// Step 5: the sharpened input stretches the detail `value - blur` as
+    /// `(detail - sharpen[0]) * sharpen[1]`, clamped to 0..1.
+    pub sharpen: [f32; 2],
 }
 
 impl Correction {
@@ -94,6 +106,9 @@ impl Correction {
             ranged: false,
             haze: false,
             airlight: [0.0; 2],
+            fusion: false,
+            gamma: 1.0,
+            sharpen: [0.0, 1.0],
         }
     }
 
@@ -117,7 +132,8 @@ impl Correction {
     }
 
     /// Flat form: matrix (12, row-major), encoded flag, compensation (2),
-    /// backscatter (3 x `RANGE_NODES`), log gain (3 x `RANGE_NODES`), ranged flag, haze flag, airlight (2).
+    /// backscatter (3 x `RANGE_NODES`), log gain (3 x `RANGE_NODES`), ranged flag, haze flag, airlight (2),
+    /// fusion flag, gamma, sharpen (2).
     pub fn to_array(&self) -> [f32; CORRECTION_LEN] {
         let mut a = [0.0; CORRECTION_LEN];
         for r in 0..3 {
@@ -128,9 +144,13 @@ impl Correction {
         }
         a[12] = self.encoded as u8 as f32;
         a[13..15].copy_from_slice(&self.comp);
-        a[CORRECTION_LEN - 4] = self.ranged as u8 as f32;
-        a[CORRECTION_LEN - 3] = self.haze as u8 as f32;
-        a[CORRECTION_LEN - 2..].copy_from_slice(&self.airlight);
+        let tail = 15 + 6 * RANGE_NODES;
+        a[tail] = self.ranged as u8 as f32;
+        a[tail + 1] = self.haze as u8 as f32;
+        a[tail + 2..tail + 4].copy_from_slice(&self.airlight);
+        a[tail + 4] = self.fusion as u8 as f32;
+        a[tail + 5] = self.gamma;
+        a[tail + 6..tail + 8].copy_from_slice(&self.sharpen);
         a
     }
 
@@ -145,9 +165,13 @@ impl Correction {
         }
         c.encoded = a[12] > 0.5;
         c.comp.copy_from_slice(&a[13..15]);
-        c.ranged = a[CORRECTION_LEN - 4] > 0.5;
-        c.haze = a[CORRECTION_LEN - 3] > 0.5;
-        c.airlight.copy_from_slice(&a[CORRECTION_LEN - 2..CORRECTION_LEN]);
+        let tail = 15 + 6 * RANGE_NODES;
+        c.ranged = a[tail] > 0.5;
+        c.haze = a[tail + 1] > 0.5;
+        c.airlight.copy_from_slice(&a[tail + 2..tail + 4]);
+        c.fusion = a[tail + 4] > 0.5;
+        c.gamma = a[tail + 5];
+        c.sharpen.copy_from_slice(&a[tail + 6..tail + 8]);
         c
     }
 }

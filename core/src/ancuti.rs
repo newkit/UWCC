@@ -11,8 +11,9 @@
 //! 3. Grey-world balance: scale each channel to the common mean.
 //!
 //! The paper continues with a multi-scale fusion of a gamma-corrected and a
-//! sharpened version of this result. That part needs spatial filtering and is
-//! not implemented.
+//! sharpened version of this result. `analyze` stops before it;
+//! `analyze_fusion` adds it (see `fusion` for how, and for what differs from
+//! the paper there).
 //!
 //! Values are sRGB-encoded, as in the paper. The method always applies.
 
@@ -48,6 +49,19 @@ pub fn analyze(rgba: &[u8]) -> Analysis {
         m[ch][ch] = grey / after[ch];
     }
     Analysis::plain(Correction { encoded: true, comp, ..Correction::affine(m) })
+}
+
+/// As [`analyze`], followed by the paper's fusion stage.
+pub fn analyze_fusion(rgba: &[u8], width: usize, height: usize) -> Analysis {
+    let mut a = analyze(rgba);
+    if a.strength == 0.0 {
+        return a; // nothing could be balanced; leave the image alone
+    }
+    let c = &mut a.correction;
+    c.gamma = crate::fusion::GAMMA;
+    c.sharpen = crate::fusion::sharpen_parameters(rgba, width, height, c);
+    c.fusion = true;
+    a
 }
 
 #[cfg(test)]

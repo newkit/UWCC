@@ -1,5 +1,5 @@
-import { type Adjustments, usesRange } from '../model';
-import { rangeMapOf } from '../render/range';
+import { type Adjustments, usesMaps } from '../model';
+import { frameMapsOf } from '../render/range';
 import { CorrectionRenderer, createWorkCanvas } from '../render/renderer';
 import { encodeJpeg } from '../worker/client';
 import { tagJpeg } from './jpegMarker';
@@ -34,7 +34,7 @@ export async function exportPhoto(
     } catch {
       throw new Error('Not enough memory to export this photo at full resolution on this device.');
     }
-    if (usesRange(correction)) renderer.setRange(range ?? await rangeMapOf(bitmap, W, H, correction));
+    if (usesMaps(correction)) renderer.setMaps(await frameMapsOf(bitmap, W, H, correction, range));
     const tile = new Uint8Array(TILE * TILE * 4);
     for (let y = 0; y < H; y += TILE) {
       checkCancelled();

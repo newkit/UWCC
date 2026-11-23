@@ -22,10 +22,11 @@ type Props = {
 /** What the other methods do, in a sentence; UWCC's own is described from its measurements. */
 const METHOD_NOTES: Record<Exclude<Algorithm, 'uwcc'>, string> = {
   matrix: 'Borrows red from green and blue by shifting the hue, then stretches each channel to full range. Always applies in full; very blue footage can turn pink.',
-  ancuti: 'White balance after Ancuti et al. (2018): adds red where there is green, then balances the channels to grey. Always applies in full.',
+  ancuti: 'The white-balance stage of Ancuti et al. (2018) alone: adds red where there is green, then balances the channels to grey. Always applies in full.',
   uwccAlways: 'UWCC\'s own correction without its check for a colour cast: applied in full even where the colours already look natural. Use it when the automatic choice leaves a file uncorrected.',
   seathruDepth: 'The Sea-thru model (Akkaynak and Treibitz, 2019) with distance from a depth-estimation network (Depth Anything V2 Small) that runs on this device. Experimental. Open water far away can turn dark and noisy.',
   udcp: 'Haze removal by the underwater dark channel prior (Drews et al., 2013). It restores contrast only; the colour cast stays, so combine it with "Pick neutral" or the temperature control. Near objects in front of open water can show a faint halo.',
+  ancutiFusion: 'Colour balance and fusion after Ancuti et al. (2018): the white balance, then a blend of a contrast-corrected and a sharpened version, weighted by local contrast, saliency and saturation. The blend is worked out on a reduced copy and applied to the full image.',
   seathru: 'The Sea-thru model (Akkaynak and Treibitz, 2019): removes haze and restores colour by distance. The distance is estimated from the image, because no depth map is available. Experimental; it needs some red left in the footage.',
 };
 

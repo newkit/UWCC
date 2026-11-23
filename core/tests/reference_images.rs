@@ -115,7 +115,15 @@ fn every_method_gives_a_sane_result() {
             let map = RangeMap::for_correction(&before, w as usize, h as usize, &analysis.correction);
             assert!(map.data.iter().all(|v| (0.0..=1.0).contains(v)), "{name} {algorithm:?}: map out of bounds");
             let mut out = before.clone();
-            apply_rgba8(&mut out, w as usize, &analysis.correction, &Adjustments::default(), Some(&map));
+            let fusion = uwcc_core::fusion::maps(&before, w as usize, h as usize, &analysis.correction);
+            uwcc_core::reference::apply_rgba8_with(
+                &mut out,
+                w as usize,
+                &analysis.correction,
+                &Adjustments::default(),
+                Some(&map),
+                Some(&fusion),
+            );
             let mean = out.as_chunks::<4>().0.iter().map(|p| p[0] as f64 + p[1] as f64 + p[2] as f64).sum::<f64>()
                 / (3.0 * (out.len() / 4) as f64);
             println!("{name} {algorithm:?}: mean level {mean:.0}");

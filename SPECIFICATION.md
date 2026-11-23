@@ -380,7 +380,9 @@ Every file is analysed by all methods at import, so switching is immediate.
 The pipeline, per pixel: take the value encoded or in linear light; add red
 and blue in proportion to green (compensation); optionally subtract
 backscatter and multiply by an attenuation gain, both looked up by the
-pixel's range; apply a 3x4 matrix; then the manual adjustments as before.
+pixel's range or haze; apply a 3x4 matrix; optionally blend a
+gamma-corrected and a sharpened version (fusion); then the manual
+adjustments as before.
 
 | Method | Source | What is implemented | What is not |
 |--------|--------|---------------------|-------------|
@@ -391,6 +393,7 @@ pixel's range; apply a 3x4 matrix; then the manual adjustments as before.
 | Sea-thru (estimated range) | Akkaynak, Treibitz: "Sea-thru: A Method for Removing Water from Underwater Images", CVPR 2019 | The paper's image formation model and estimation steps: backscatter fitted to the darkest 1 % of pixels in ten range bins; illuminant by local space average colour among neighbours of similar range; attenuation coefficient as a two-term exponential of range; recovery and grey-world balance. In linear light | **The range map.** The paper measures range with stereo or structure from motion. UWCC has one image and estimates relative range from colour (below). Also: 8-bit JPEG or video instead of linear RAW; a simpler attenuation fit; caps on the gains. Listed at the top of `core/src/seathru.rs` |
 | Sea-thru (depth model) | The same, with range from a monocular depth network: Yang et al., "Depth Anything V2", 2024 (Small model, Apache-2.0) | As above, on a range map made from the network's output (below). Photos only | For video it falls back to the range estimated from colour: the network is too slow to run on every frame. The network gives relative depth, not metres |
 | UDCP haze removal | Drews Jr, do Nascimento, Moraes, Botelho, Campos: "Transmission Estimation in Underwater Single Images", ICCV Workshops 2013 | The underwater dark channel prior: transmission from the minimum of green and blue over a patch, relative to the water colour found where that minimum is brightest; recovery `(I - A) / max(t, 0.1) + A`. On encoded values. The map of the image holds the haze `1 - t` in place of range | The map is computed on a grid of at most 96 cells and blurred; the paper works at full resolution with image matting, so UWCC's map has soft edges. Water colour averaged over the brightest 0.1 %, not one pixel. Listed at the top of `core/src/udcp.rs` |
+| Ancuti balance and fusion | Ancuti et al. 2018, as above | The white balance, then the paper's fusion stage: a gamma-corrected and a sharpened input (normalised unsharp masking), weights from Laplacian contrast, saliency (Achanta et al. 2009) and saturation, normalised with delta = 0.1, blended over Laplacian and Gaussian pyramids | The multi-scale blend is computed on a copy of at most 256 cells per side and applied to the full image per pixel (below), so detail finer than the copy is blended with smooth weights. Gamma (1.5), the blur and the relative scale of the weights are not given in the paper and are UWCC's choices. Listed at the top of `core/src/fusion.rs` |
 
 **Estimated range** (`core/src/range.rs`). After the underwater light
 attenuation prior of Song et al. 2018: range grows with max(green, blue) and
@@ -426,6 +429,26 @@ with red absent the model has nothing to restore, and where the map says
 "far" (open water behind the dolphins) nearly everything is removed as
 backscatter and the remainder amplified, which gives dark, noisy water.
 That is the method's behaviour without a signal, not a fault of the depth.
+
+**Fusion in the pipeline** (`core/src/fusion.rs`). The paper's fusion is
+spatial: pyramids of two images and their weight maps. To keep one per-pixel
+pipeline (tiled export, per-frame video, CPU reference), it is split in two.
+The core runs the complete multi-scale fusion on a small copy of the frame
+and returns three maps: the weight of the first input, the blurred image the
+sharpened input is measured against, and an offset. The pipeline's fusion
+step (off by default) then computes both inputs for each full-resolution
+pixel, blends them with the interpolated weight and adds the offset, which
+is the difference between the multi-scale result and that plain blend on the
+copy. On an image of the copy's size this reproduces the multi-scale result
+exactly (a unit test checks it). The maps are two small float textures,
+recomputed for every video frame like the range map.
+
+By eye: against the white balance alone, the result is darker (the gamma
+input), with clearly more local contrast and sharper detail; the colours are
+those of the white balance, so the yellowish cast on the deep photos stays.
+On the clip it is steady over time, and a multi-tile export shows no seam.
+On a low-quality or enlarged source the sharpening brings out compression
+artefacts.
 
 **UDCP results**, by eye: contrast comes back and the water turns a deeper
 blue, and as in the paper the colour cast stays, so it is a companion to the
@@ -489,7 +512,7 @@ whenever the item's method or adjustments change (after leaving the editor,
 or at once for "apply to all").
 
 Not done: depth from the model for video, measured depth (dual-camera
-phones), the model on the GPU (WebGPU), and the fusion stage of Ancuti et al.
+phones), and the model on the GPU (WebGPU).
 
 ## 7. Batch processing and output location
 
@@ -695,6 +718,9 @@ Status on 2026-11-23:
   CPU reference to within 1 of 255 on every branch of the pipeline, in a
   software-rendered browser. Verified headless on photos (including a
   multi-tile export) and on the owner's clip. Not verified on real GPUs.
+- Ancuti fusion stage (§6.7): done. The shader matches the CPU reference to
+  within 1 of 255 on the fusion step too; verified headless on photos
+  (including a multi-tile export) and the clip.
 - UDCP haze removal (§6.7): done, verified headless on photos and the clip.
 - Sea-thru on a depth model (§6.7): done for photos, verified headless
   (model loaded on first use only, preview, export, batch, thumbnails).

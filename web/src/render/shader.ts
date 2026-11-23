@@ -23,6 +23,12 @@ uniform float u_logGain[24];     // per channel, 8 samples over range: log of th
 uniform highp sampler2D u_range; // range map, one float per cell, 0 near .. 1 far
 uniform vec2 u_rangeSize;    // its size in cells
 uniform vec4 u_rangeRect;    // the part of the whole image this draw covers: x, y, width, height (0..1)
+uniform float u_fusion;      // 1 = fusion step is active
+uniform float u_gamma;       // exponent of the gamma-corrected input
+uniform vec2 u_sharpen;      // shift and scale of the sharpened input's detail
+uniform highp sampler2D u_fusionA; // fusion maps: offset (rgb) and weight of the first input (a)
+uniform highp sampler2D u_fusionB; // fusion maps: blurred balanced image (rgb)
+uniform vec2 u_fusionSize;   // their size in cells
 uniform mat3 u_matrix;       // affine part of the automatic correction
 uniform vec3 u_offset;
 uniform float u_strength;    // 0 = original, 1 = full correction
@@ -42,6 +48,17 @@ float rangeAt(vec2 uv) {
   vec2 f = p - floor(p);
   float top = mix(texelFetch(u_range, i0, 0).r, texelFetch(u_range, ivec2(i1.x, i0.y), 0).r, f.x);
   float bottom = mix(texelFetch(u_range, ivec2(i0.x, i1.y), 0).r, texelFetch(u_range, i1, 0).r, f.x);
+  return mix(top, bottom, f.y);
+}
+
+// The same lookup for the fusion maps; as FusionMaps::sample in the core.
+vec4 fusionAt(highp sampler2D map, vec2 uv) {
+  vec2 p = clamp(uv * u_fusionSize - 0.5, vec2(0.0), u_fusionSize - 1.0);
+  ivec2 i0 = ivec2(floor(p));
+  ivec2 i1 = min(i0 + 1, ivec2(u_fusionSize) - 1);
+  vec2 f = p - floor(p);
+  vec4 top = mix(texelFetch(map, i0, 0), texelFetch(map, ivec2(i1.x, i0.y), 0), f.x);
+  vec4 bottom = mix(texelFetch(map, ivec2(i0.x, i1.y), 0), texelFetch(map, i1, 0), f.x);
   return mix(top, bottom, f.y);
 }
 
@@ -78,6 +95,16 @@ void main() {
     }
   }
   vec3 corrected = max(u_matrix * x + u_offset, 0.0);
+  if (u_fusion > 0.5) {
+    // Blend a gamma-corrected and a sharpened version, as the fusion step in the core's reference.
+    vec2 at = u_rangeRect.xy + v_uv * u_rangeRect.zw;
+    vec4 a = fusionAt(u_fusionA, at);
+    vec3 blur = fusionAt(u_fusionB, at).rgb;
+    vec3 y = clamp(corrected, 0.0, 1.0);
+    vec3 first = pow(y, vec3(u_gamma));
+    vec3 second = 0.5 * (y + clamp((y - blur - u_sharpen.x) * u_sharpen.y, 0.0, 1.0));
+    corrected = max(a.a * first + (1.0 - a.a) * second + a.rgb, 0.0);
+  }
   if (u_encoded > 0.5) corrected = toLinear(min(corrected, 1.0));
   vec3 v = mix(lin, corrected, u_strength);
   vec3 s = toSrgb(v * u_whiteBalance * u_exposure);

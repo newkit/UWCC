@@ -13,6 +13,7 @@
 pub mod analysis;
 pub mod ancuti;
 pub mod color;
+pub mod fusion;
 pub mod matrix;
 pub mod model;
 pub mod range;
@@ -22,6 +23,7 @@ pub mod udcp;
 mod wasm;
 
 pub use analysis::{analyze_linear, analyze_srgb8, Analysis};
+pub use fusion::FusionMaps;
 pub use model::{Adjustments, Algorithm, Correction, ADJUSTMENTS_LEN, CORRECTION_LEN};
 pub use range::RangeMap;
 
@@ -46,6 +48,7 @@ pub fn analyze_with_range(
         Algorithm::Ancuti => ancuti::analyze(rgba),
         Algorithm::SeaThru => seathru::analyze(rgba, width, height),
         Algorithm::UwccAlways => analysis::analyze_srgb8_always(rgba),
+        Algorithm::AncutiFusion => ancuti::analyze_fusion(rgba, width, height),
         Algorithm::Udcp => udcp::analyze(rgba, width, height),
         Algorithm::SeaThruDepth => match range {
             Some(map) => seathru::analyze_with_range(rgba, width, height, map),

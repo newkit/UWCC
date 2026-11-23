@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { type Adjustments, mapKey, usesRange } from '../model';
-import { rangeMapOf } from '../render/range';
+import { type Adjustments, mapKey, usesMaps } from '../model';
+import { frameMapsOf } from '../render/range';
 import { CorrectionRenderer } from '../render/renderer';
 
 type Props = {
@@ -34,7 +34,7 @@ export function Viewer({ source, width, height, frame = 0, label, correction, ra
   const [split, setSplit] = useState(0.5);
   // Counts range maps handed to the renderer, so that the frame is drawn again when one arrives.
   const [rangeVersion, setRangeVersion] = useState(0);
-  const ranged = usesRange(correction);
+  const ranged = usesMaps(correction);
   // Which map the correction needs; for video the correction itself changes with every frame.
   const mapOf = mapKey(correction);
   const correctionRef = useRef(correction);
@@ -67,10 +67,10 @@ export function Viewer({ source, width, height, frame = 0, label, correction, ra
   useEffect(() => {
     if (!ranged || width === 0 || height === 0) return;
     const renderer = rendererRef.current;
-    (range ? Promise.resolve(range) : rangeMapOf(source as CanvasImageSource, width, height, correctionRef.current))
-      .then((map) => {
+    frameMapsOf(source as CanvasImageSource, width, height, correctionRef.current, range)
+      .then((maps) => {
         if (rendererRef.current !== renderer || !renderer) return;
-        renderer.setRange(map);
+        renderer.setMaps(maps);
         setRangeVersion((v) => v + 1);
       })
       .catch((error) => onError(error instanceof Error ? error.message : String(error)));

@@ -1,25 +1,13 @@
 // The neutral picker: the user points at something that should be grey or
 // white, and the channel gains that make it so become part of the adjustments.
 
-import { usesRange } from '../model';
 import { neutralGains } from '../worker/client';
-import { rangeMapOf } from './range';
+import { frameMapsOf } from './range';
 
 /** Side of the sampled patch, as a share of the image's short side. */
 const PATCH_SHARE = 0.02;
 /** The patch is read at no more than this many pixels per side. */
 const PATCH_MAX = 16;
-
-/** Bilinear lookup in a range map as the core returns it (width, height, cells); same arithmetic as the shader. */
-function sampleRange(map: Float32Array, u: number, v: number): number {
-  const w = map[0], h = map[1];
-  const x = Math.min(Math.max(u * w - 0.5, 0), w - 1), y = Math.min(Math.max(v * h - 0.5, 0), h - 1);
-  const x0 = Math.floor(x), y0 = Math.floor(y), x1 = Math.min(x0 + 1, w - 1), y1 = Math.min(y0 + 1, h - 1);
-  const at = (cx: number, cy: number) => map[2 + cy * w + cx];
-  const top = at(x0, y0) + (at(x1, y0) - at(x0, y0)) * (x - x0);
-  const bottom = at(x0, y1) + (at(x1, y1) - at(x0, y1)) * (x - x0);
-  return top + (bottom - top) * (y - y0);
-}
 
 /**
  * Gains that make the spot at (u, v), 0..1 from the top left of the image,
@@ -48,8 +36,8 @@ export async function pickNeutral(
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(source, x, y, Math.min(side, width), Math.min(side, height), 0, 0, out, out);
   const patch = new Uint8Array(ctx.getImageData(0, 0, out, out).data.buffer);
-  const range = usesRange(correction) ? sampleRange(fixedRange ?? await rangeMapOf(source, width, height, correction), u, v) : 0.5;
-  const gains = await neutralGains(patch, correction, strength, range);
+  const maps = await frameMapsOf(source, width, height, correction, fixedRange);
+  const gains = await neutralGains(patch, correction, strength, u, v, maps);
   if (gains.length !== 3) throw new Error('That spot is too dark or too bright to read its colour. Pick another one.');
   return [gains[0], gains[1], gains[2]];
 }

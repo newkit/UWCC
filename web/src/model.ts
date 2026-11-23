@@ -44,6 +44,7 @@ export const ALGORITHMS = [
   { id: 'uwccAlways', core: 4, label: 'UWCC, always applied' },
   { id: 'seathruDepth', core: 5, label: 'Sea-thru (depth model)' },
   { id: 'udcp', core: 6, label: 'UDCP haze removal' },
+  { id: 'ancutiFusion', core: 7, label: 'Ancuti balance and fusion' },
 ] as const;
 
 export type Algorithm = (typeof ALGORITHMS)[number]['id'];
@@ -62,12 +63,14 @@ export const RANGE_NODES = 8;
 /**
  * Number of values in a correction. The layout is that of `Correction::to_array` in the core:
  * matrix (12), encoded flag, compensation (2), backscatter and log-gain tables (3 x RANGE_NODES each), ranged flag,
- * haze flag, airlight (2).
+ * haze flag, airlight (2), fusion flag, gamma, sharpen (2).
  */
-export const CORRECTION_LEN = 19 + 6 * RANGE_NODES;
+export const CORRECTION_LEN = 23 + 6 * RANGE_NODES;
 
 /** Position of the ranged flag; the haze flag and the airlight follow it. */
 const RANGED_AT = 15 + 6 * RANGE_NODES;
+/** Position of the fusion flag; gamma and the two sharpen values follow it. */
+export const FUSION_AT = RANGED_AT + 4;
 
 /**
  * Result of the automatic analysis. `correction` starts with a row-major 3x4
@@ -91,6 +94,7 @@ export type Analyses = Partial<Record<Algorithm, Analysis>>;
 
 export const IDENTITY_CORRECTION = new Float32Array(CORRECTION_LEN);
 IDENTITY_CORRECTION.set([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0]);
+IDENTITY_CORRECTION.set([1, 0, 1], FUSION_AT + 1); // gamma 1, sharpen (0, 1)
 
 /** Does this correction read a map of the image (range or haze), so that drawing it needs one? */
 export const usesRange = (correction: Float32Array) => correction[RANGED_AT] > 0.5;
@@ -99,8 +103,17 @@ export const usesRange = (correction: Float32Array) => correction[RANGED_AT] > 0
  * Identifies the map a correction needs for a given frame: two corrections with
  * the same key get the same map from the same pixels.
  */
-export const mapKey = (correction: Float32Array) =>
-  usesRange(correction) ? Array.from(correction.subarray(RANGED_AT + 1, CORRECTION_LEN), (v) => v.toFixed(4)).join(',') : '';
+export const mapKey = (correction: Float32Array) => {
+  // Fusion maps depend on the whole correction; range and haze maps only on the haze flag and the airlight.
+  const part = usesFusion(correction) ? correction : usesRange(correction) ? correction.subarray(RANGED_AT + 1, RANGED_AT + 4) : null;
+  return part ? Array.from(part, (v) => v.toFixed(4)).join(',') : '';
+};
+
+/** Does this correction have the fusion step, so that drawing it needs fusion maps? */
+export const usesFusion = (correction: Float32Array) => correction[FUSION_AT] > 0.5;
+
+/** Does drawing this correction need any map of the image? */
+export const usesMaps = (correction: Float32Array) => usesRange(correction) || usesFusion(correction);
 
 export function analysisFromArray(a: Float32Array): Analysis {
   const n = CORRECTION_LEN;

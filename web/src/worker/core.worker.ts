@@ -2,14 +2,15 @@
 // Runs the WASM core and the JPEG encoder off the main thread.
 
 import encodeJpeg from '@jsquash/jpeg/encode';
-import init, { analyze, apply_reference, neutral_gains, range_from_disparity, range_map } from '../core-pkg/uwcc_core.js';
+import init, { analyze, apply_reference, fusion_maps, neutral_gains, range_from_disparity, range_map } from '../core-pkg/uwcc_core.js';
 
 export type Request =
   | { id: number; type: 'analyze'; rgba: Uint8Array; width: number; height: number; algorithms: number[]; range: Float32Array }
   | { id: number; type: 'rangeFromDisparity'; disparity: Float32Array; width: number; height: number }
   | { id: number; type: 'rangeMap'; rgba: Uint8Array; width: number; height: number; correction: Float32Array }
-  | { id: number; type: 'neutral'; patch: Uint8Array; correction: Float32Array; strength: number; range: number }
-  | { id: number; type: 'reference'; rgba: Uint8Array; width: number; params: Float32Array; range: Float32Array }
+  | { id: number; type: 'fusionMaps'; rgba: Uint8Array; width: number; height: number; correction: Float32Array }
+  | { id: number; type: 'neutral'; patch: Uint8Array; correction: Float32Array; strength: number; u: number; v: number; range: Float32Array; fusion: Float32Array }
+  | { id: number; type: 'reference'; rgba: Uint8Array; width: number; params: Float32Array; range: Float32Array; fusion: Float32Array }
   | { id: number; type: 'encodeJpeg'; rgba: Uint8ClampedArray; width: number; height: number; quality: number };
 
 export type Response = { id: number; ok: true; result: unknown } | { id: number; ok: false; error: string };
@@ -29,9 +30,11 @@ self.onmessage = async (event: MessageEvent<Request>) => {
     } else if (msg.type === 'rangeMap') {
       result = range_map(msg.rgba, msg.width, msg.height, msg.correction);
     } else if (msg.type === 'neutral') {
-      result = neutral_gains(msg.patch, msg.correction, msg.strength, msg.range);
+      result = neutral_gains(msg.patch, msg.correction, msg.strength, msg.u, msg.v, msg.range, msg.fusion);
+    } else if (msg.type === 'fusionMaps') {
+      result = fusion_maps(msg.rgba, msg.width, msg.height, msg.correction);
     } else if (msg.type === 'reference') {
-      apply_reference(msg.rgba, msg.width, msg.params, msg.range);
+      apply_reference(msg.rgba, msg.width, msg.params, msg.range, msg.fusion);
       result = msg.rgba;
     } else {
       const image = { data: msg.rgba, width: msg.width, height: msg.height } as unknown as ImageData;
