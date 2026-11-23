@@ -13,10 +13,14 @@ use crate::range::RangeMap;
 /// open water (0..1), the green/blue ratio of open water, and the strength
 /// (0..1) at which the correction was applied. Only UWCC's own method
 /// measures the first three.
+///
+/// `range` is a range map in its flat form for the methods that take one
+/// from outside, or empty.
 #[wasm_bindgen]
-pub fn analyze(rgba: &[u8], width: u32, height: u32, algorithm: u32) -> Vec<f32> {
+pub fn analyze(rgba: &[u8], width: u32, height: u32, algorithm: u32, range: &[f32]) -> Vec<f32> {
     let algorithm = Algorithm::from_id(algorithm).unwrap_or(Algorithm::Uwcc);
-    let a = crate::analyze(algorithm, rgba, width as usize, height as usize);
+    let map = RangeMap::from_flat(range);
+    let a = crate::analyze_with_range(algorithm, rgba, width as usize, height as usize, map.as_ref());
     let mut out = a.correction.to_array().to_vec();
     out.extend_from_slice(&[a.depletion, a.scene_fraction, a.water_ratio, a.strength]);
     out
@@ -27,6 +31,13 @@ pub fn analyze(rgba: &[u8], width: u32, height: u32, algorithm: u32) -> Vec<f32>
 #[wasm_bindgen]
 pub fn range_map(rgba: &[u8], width: u32, height: u32) -> Vec<f32> {
     RangeMap::from_srgb8(rgba, width as usize, height as usize).to_flat()
+}
+
+/// Range map from a depth model's output (relative inverse depth, larger =
+/// nearer, `width` x `height` values), in the same flat form as `range_map`.
+#[wasm_bindgen]
+pub fn range_from_disparity(disparity: &[f32], width: u32, height: u32) -> Vec<f32> {
+    RangeMap::from_disparity(disparity, width as usize, height as usize).to_flat()
 }
 
 /// Apply the reference implementation in place to an RGBA8 buffer.

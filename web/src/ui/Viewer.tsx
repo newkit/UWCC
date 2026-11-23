@@ -12,6 +12,8 @@ type Props = {
   frame?: number;
   label: string;
   correction: Float32Array;
+  /** The range map to draw with, for corrections analysed on a map of their own; otherwise it is estimated from the frame. */
+  range?: Float32Array;
   adjustments: Adjustments;
   /** Split view: original on the left of a draggable divider. */
   compare: boolean;
@@ -23,7 +25,7 @@ type Props = {
   onError: (message: string) => void;
 };
 
-export function Viewer({ source, width, height, frame = 0, label, correction, adjustments, compare, showOriginal, picking = false, onPick, onError }: Props) {
+export function Viewer({ source, width, height, frame = 0, label, correction, range, adjustments, compare, showOriginal, picking = false, onPick, onError }: Props) {
   const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<CorrectionRenderer | null>(null);
@@ -61,14 +63,14 @@ export function Viewer({ source, width, height, frame = 0, label, correction, ad
   useEffect(() => {
     if (!ranged || width === 0 || height === 0) return;
     const renderer = rendererRef.current;
-    rangeMapOf(source as CanvasImageSource, width, height)
+    (range ? Promise.resolve(range) : rangeMapOf(source as CanvasImageSource, width, height))
       .then((map) => {
         if (rendererRef.current !== renderer || !renderer) return;
         renderer.setRange(map);
         setRangeVersion((v) => v + 1);
       })
       .catch((error) => onError(error instanceof Error ? error.message : String(error)));
-  }, [ranged, source, width, height, frame, onError]);
+  }, [ranged, range, source, width, height, frame, onError]);
 
   useEffect(() => {
     const renderer = rendererRef.current;

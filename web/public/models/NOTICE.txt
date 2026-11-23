@@ -1,0 +1,15 @@
+depth-anything-v2-small-q8.onnx
+
+Depth Anything V2 Small, by Lihe Yang, Bingyi Kang, Zilong Huang, Zhen Zhao,
+Xiaogang Xu, Jiashi Feng and Hengshuang Zhao ("Depth Anything V2", 2024).
+https://github.com/DepthAnything/Depth-Anything-V2
+
+Licensed under the Apache License, Version 2.0:
+https://www.apache.org/licenses/LICENSE-2.0
+
+This file is the 8-bit quantised ONNX conversion published by the
+onnx-community organisation on Hugging Face
+(onnx-community/depth-anything-v2-small, file onnx/model_quantized.onnx,
+revision 4472b7362082ad9968fee890ca0f1e5aca36b93d). It is used unmodified.
+Only the Small model is under the Apache licence; the larger Depth Anything
+V2 models are not, and are not used here.

@@ -1,2 +1,3 @@
 testdata/local/
 target/
+web/public/models/*.onnx

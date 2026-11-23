@@ -26,11 +26,28 @@ pub use range::RangeMap;
 
 /// Analyse an RGBA8 sRGB image of `width` x `height` pixels with the chosen method.
 pub fn analyze(algorithm: Algorithm, rgba: &[u8], width: usize, height: usize) -> Analysis {
+    analyze_with_range(algorithm, rgba, width, height, None)
+}
+
+/// As [`analyze`], with a range map for the methods that take one from
+/// outside (`Algorithm::SeaThruDepth`). Without a map those fall back to the
+/// range estimated from the image's colours.
+pub fn analyze_with_range(
+    algorithm: Algorithm,
+    rgba: &[u8],
+    width: usize,
+    height: usize,
+    range: Option<&RangeMap>,
+) -> Analysis {
     match algorithm {
         Algorithm::Uwcc => analysis::analyze_srgb8(rgba),
         Algorithm::Matrix => matrix::analyze(rgba),
         Algorithm::Ancuti => ancuti::analyze(rgba),
         Algorithm::SeaThru => seathru::analyze(rgba, width, height),
         Algorithm::UwccAlways => analysis::analyze_srgb8_always(rgba),
+        Algorithm::SeaThruDepth => match range {
+            Some(map) => seathru::analyze_with_range(rgba, width, height, map),
+            None => seathru::analyze(rgba, width, height),
+        },
     }
 }

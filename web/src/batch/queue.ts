@@ -2,14 +2,14 @@
 // the same thing with one job.
 
 import { exportPhoto } from '../io/exportPhoto';
-import { loadAnalysisCopy } from '../io/importPhoto';
+import { loadAnalysisCopy, resizedPixels } from '../io/importPhoto';
 import { isTaggedJpeg } from '../io/jpegMarker';
 import { deliver, isProcessedName, type WriteResult } from '../io/output';
 import type { Source } from '../io/sources';
-import { type Adjustments, type Algorithm, type Analyses, type Analysis, CONTROLS, DEFAULT_ADJUSTMENTS, packParams, usesRange } from '../model';
+import { type Adjustments, type Algorithm, type Analyses, type Analysis, CONTROLS, DEFAULT_ADJUSTMENTS, DEFAULT_ALGORITHM, packParams, usesDepthModel, usesRange } from '../model';
 import type { Settings } from '../settings/settings';
 import type { VideoMeta } from '../video/video';
-import { analyze, applyReference, rangeMap } from '../worker/client';
+import { analyze, analyzeWithRange, applyReference, rangeMap } from '../worker/client';
 
 export type JobStatus =
   | 'analyzing'   // waiting for or running the automatic analysis
@@ -30,6 +30,8 @@ export type Job = {
   analysis?: Analyses;
   algorithm: Algorithm;
   adjustments: Adjustments;
+  /** Photos only: the range map from the depth model, once a method that needs it was chosen. */
+  depthRange?: Float32Array;
   /** Videos only: the correction over time (per method), and clip facts. */
   video?: VideoMeta;
   /** Small uncorrected copy (data URL) the thumbnail is rendered from. */
@@ -67,13 +69,33 @@ export async function alreadyCorrected(source: Source): Promise<boolean> {
   return isTaggedJpeg(source.file);
 }
 
+/**
+ * The range map the job's method was analysed on, when that is not the one
+ * estimated from colour: preview, thumbnail and export must use the same map.
+ */
+export const fixedRange = (job: Pick<Job, 'algorithm' | 'video' | 'depthRange'>): Float32Array | undefined =>
+  usesDepthModel(job.algorithm) && !job.video ? job.depthRange : undefined;
+
+/** Has the job's method still to be analysed with the depth model? */
+export const needsDepth = (job: Job): boolean =>
+  usesDepthModel(job.algorithm) && job.source.kind === 'photo' && !!job.analysis && !job.analysis[job.algorithm];
+
+/** Run the depth model on a photo and analyse it by `algorithm` on the resulting range map. */
+export async function prepareDepth(source: Source, algorithm: Algorithm): Promise<{ analysis: Analysis; depthRange: Float32Array }> {
+  const { depthInputSize, depthRange } = await import('../depth/depth');
+  const copy = await loadAnalysisCopy(source.file, source.name);
+  const size = depthInputSize(copy.mid.width, copy.mid.height);
+  const range = await depthRange(resizedPixels(copy.mid, size.width, size.height), size.width, size.height);
+  return { analysis: await analyzeWithRange(algorithm, copy.pixels, copy.width, copy.height, range), depthRange: range };
+}
+
 /** Identifies what a thumbnail shows, so that it is rendered again when the method or an adjustment changes. */
 export const thumbKey = (job: Pick<Job, 'algorithm' | 'adjustments'>) =>
   `${job.algorithm}:${CONTROLS.map((c) => job.adjustments[c.key]).join(',')}:${job.adjustments.neutral.join(',')}`;
 
 /** The job's thumbnail with its current method and adjustments (for a video: of the first frame). */
-export async function renderThumb(job: Pick<Job, 'thumbSource' | 'analysis' | 'video' | 'algorithm' | 'adjustments'>): Promise<string> {
-  const correction = job.video ? job.video.keys[job.algorithm].corrections[0] : job.analysis?.[job.algorithm].correction;
+export async function renderThumb(job: Pick<Job, 'thumbSource' | 'analysis' | 'video' | 'depthRange' | 'algorithm' | 'adjustments'>): Promise<string> {
+  const correction = job.video ? job.video.keys[job.algorithm].corrections[0] : job.analysis?.[job.algorithm]?.correction;
   if (!job.thumbSource || !correction) throw new Error('This file has not been analysed.');
   const image = new Image();
   image.src = job.thumbSource;
@@ -84,7 +106,7 @@ export async function renderThumb(job: Pick<Job, 'thumbSource' | 'analysis' | 'v
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
   ctx.drawImage(image, 0, 0);
   const pixels = new Uint8Array(ctx.getImageData(0, 0, canvas.width, canvas.height).data.buffer);
-  const range = usesRange(correction) ? await rangeMap(pixels, canvas.width, canvas.height) : undefined;
+  const range = usesRange(correction) ? fixedRange(job) ?? await rangeMap(pixels, canvas.width, canvas.height) : undefined;
   const corrected = await applyReference(pixels, canvas.width, packParams(correction, job.adjustments), range);
   ctx.putImageData(new ImageData(new Uint8ClampedArray(corrected), canvas.width, canvas.height), 0, 0);
   return canvas.toDataURL('image/jpeg', 0.8);
@@ -115,7 +137,8 @@ export async function prepare(
       height: copy.sourceHeight,
     };
   }
-  const shown = { algorithm, adjustments: DEFAULT_ADJUSTMENTS };
+  // A method that waits for the depth model gets its thumbnail when that is done; until then the default method's.
+  const shown = { algorithm: found.video || found.analysis?.[algorithm] ? algorithm : DEFAULT_ALGORITHM, adjustments: DEFAULT_ADJUSTMENTS };
   return { ...found, thumb: await renderThumb({ ...found, ...shown }), thumbKey: thumbKey(shown) };
 }
 
@@ -151,6 +174,7 @@ export async function process(
     // Rendering is most of the visible work; encoding has no progress of its own.
     (fraction, stage) => onProgress(stage === 'render' ? fraction * 0.7 : 0.75),
     signal,
+    fixedRange(job),
   );
   return deliver(job.source, blob, target);
 }

@@ -2,10 +2,11 @@
 // Runs the WASM core and the JPEG encoder off the main thread.
 
 import encodeJpeg from '@jsquash/jpeg/encode';
-import init, { analyze, apply_reference, neutral_gains, range_map } from '../core-pkg/uwcc_core.js';
+import init, { analyze, apply_reference, neutral_gains, range_from_disparity, range_map } from '../core-pkg/uwcc_core.js';
 
 export type Request =
-  | { id: number; type: 'analyze'; rgba: Uint8Array; width: number; height: number; algorithms: number[] }
+  | { id: number; type: 'analyze'; rgba: Uint8Array; width: number; height: number; algorithms: number[]; range: Float32Array }
+  | { id: number; type: 'rangeFromDisparity'; disparity: Float32Array; width: number; height: number }
   | { id: number; type: 'rangeMap'; rgba: Uint8Array; width: number; height: number }
   | { id: number; type: 'neutral'; patch: Uint8Array; correction: Float32Array; strength: number; range: number }
   | { id: number; type: 'reference'; rgba: Uint8Array; width: number; params: Float32Array; range: Float32Array }
@@ -22,7 +23,9 @@ self.onmessage = async (event: MessageEvent<Request>) => {
     let result: unknown;
     const transfer: Transferable[] = [];
     if (msg.type === 'analyze') {
-      result = msg.algorithms.map((algorithm) => analyze(msg.rgba, msg.width, msg.height, algorithm));
+      result = msg.algorithms.map((algorithm) => analyze(msg.rgba, msg.width, msg.height, algorithm, msg.range));
+    } else if (msg.type === 'rangeFromDisparity') {
+      result = range_from_disparity(msg.disparity, msg.width, msg.height);
     } else if (msg.type === 'rangeMap') {
       result = range_map(msg.rgba, msg.width, msg.height);
     } else if (msg.type === 'neutral') {

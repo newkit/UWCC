@@ -32,6 +32,8 @@ const PRIOR: [f32; 3] = [0.532, 0.513, -0.911];
 /// Added to the brightest channel before dividing, so that near-black cells do not amplify noise.
 const DARK_FLOOR: f32 = 0.02;
 const BLUR_PASSES: usize = 4;
+/// A map made from a depth model's output is at most this many cells on its longer side.
+pub const DEPTH_MAX: usize = 160;
 
 /// Relative range per grid cell, 0 (near) to 1 (far), rows top to bottom.
 #[derive(Clone, Debug, PartialEq)]
@@ -101,6 +103,53 @@ impl RangeMap {
         RangeMap { width: gw, height: gh, data }
     }
 
+    /// Range map from the output of a monocular depth model: relative
+    /// inverse depth ("disparity", larger = nearer) per pixel, rows top to
+    /// bottom. Such models give depth only up to an unknown scale and shift,
+    /// so the map is anchored by assumption: the nearest content (99th
+    /// percentile of disparity) is taken to be at `Z_NEAR`, the farthest
+    /// (1st percentile) at `Z_FAR`, and range is the reciprocal of disparity
+    /// in between. The result is reduced to at most `DEPTH_MAX` cells on its
+    /// longer side.
+    pub fn from_disparity(disparity: &[f32], width: usize, height: usize) -> RangeMap {
+        if width == 0 || height == 0 || disparity.len() < width * height {
+            return RangeMap { width: 1, height: 1, data: vec![0.5] };
+        }
+        // Block average down to the stored size.
+        let scale = (DEPTH_MAX as f32 / width.max(height) as f32).min(1.0);
+        let gw = ((width as f32 * scale).round() as usize).max(1);
+        let gh = ((height as f32 * scale).round() as usize).max(1);
+        let mut sum = vec![0.0f32; gw * gh];
+        let mut count = vec![0u32; gw * gh];
+        for y in 0..height {
+            let gy = y * gh / height;
+            for x in 0..width {
+                let v = disparity[y * width + x];
+                if v.is_finite() {
+                    sum[gy * gw + x * gw / width] += v;
+                    count[gy * gw + x * gw / width] += 1;
+                }
+            }
+        }
+        let cells: Vec<f32> = sum.iter().zip(&count).map(|(s, &n)| s / n.max(1) as f32).collect();
+        let near = crate::analysis::percentile(&cells, 99.0);
+        let far = crate::analysis::percentile(&cells, 1.0);
+        if near - far < 1e-6 {
+            return RangeMap { width: gw, height: gh, data: vec![0.5; gw * gh] };
+        }
+        // Disparity is linear in 1/range between the two anchors.
+        let (inv_near, inv_far) = (1.0 / Z_NEAR, 1.0 / Z_FAR);
+        let data = cells
+            .iter()
+            .map(|&c| {
+                let t = ((c - far) / (near - far)).clamp(0.0, 1.0);
+                let z = 1.0 / (inv_far + (inv_near - inv_far) * t);
+                (z - Z_NEAR) / (Z_FAR - Z_NEAR)
+            })
+            .collect();
+        RangeMap { width: gw, height: gh, data }
+    }
+
     /// Bilinear lookup at image position `u`, `v` (0..1, origin top left).
     /// The shader does the same arithmetic on the map as a texture.
     pub fn sample(&self, u: f32, v: f32) -> f32 {
@@ -136,6 +185,28 @@ impl RangeMap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn disparity_maps_near_and_far_to_the_ends_and_is_reciprocal_in_between() {
+        // Disparity falls linearly from left (near) to right (far).
+        let (w, h) = (100, 4);
+        let disparity: Vec<f32> = (0..w * h).map(|i| 5.0 - 4.0 * (i % w) as f32 / (w - 1) as f32).collect();
+        let map = RangeMap::from_disparity(&disparity, w, h);
+        assert_eq!((map.width, map.height), (w, h));
+        assert!(map.data[0] < 0.01 && map.data[w - 1] > 0.99);
+        assert!(map.data.windows(2).take(w - 1).all(|p| p[1] >= p[0]));
+        // Half-way in disparity is 1 / mean(1/1, 1/10) = 1.82 m, far nearer than half-way in range.
+        let mid = metres(map.data[w / 2]);
+        assert!((mid - 1.82).abs() < 0.1, "{mid}");
+    }
+
+    #[test]
+    fn disparity_without_spread_or_data_gives_a_flat_map() {
+        assert!(RangeMap::from_disparity(&[2.0; 64], 8, 8).data.iter().all(|&v| v == 0.5));
+        assert_eq!(RangeMap::from_disparity(&[], 8, 8).data, vec![0.5]);
+        let big = RangeMap::from_disparity(&vec![1.0; 400 * 200], 400, 200);
+        assert_eq!((big.width, big.height), (DEPTH_MAX, DEPTH_MAX / 2));
+    }
 
     fn image(width: usize, height: usize, f: impl Fn(usize, usize) -> [u8; 3]) -> Vec<u8> {
         let mut out = Vec::with_capacity(width * height * 4);

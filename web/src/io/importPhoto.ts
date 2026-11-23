@@ -64,8 +64,19 @@ export async function loadAnalysisCopy(file: Blob, name: string) {
   const bitmap = await decode(file, name);
   try {
     const mid = scaled(bitmap, 1024);
-    return { ...analysisCopy(mid, mid.width, mid.height), sourceWidth: bitmap.width, sourceHeight: bitmap.height };
+    return { ...analysisCopy(mid, mid.width, mid.height), mid, sourceWidth: bitmap.width, sourceHeight: bitmap.height };
   } finally {
     bitmap.close();
   }
+}
+
+/** RGBA pixels of `source` resized to exactly `width` x `height` (the input of the depth model). */
+export function resizedPixels(source: CanvasImageSource, width: number, height: number): Uint8Array {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(source, 0, 0, width, height);
+  return new Uint8Array(ctx.getImageData(0, 0, width, height).data.buffer);
 }

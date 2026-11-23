@@ -13,11 +13,19 @@ pub enum Algorithm {
     SeaThru = 3,
     /// UWCC's own method without its cast check: always applied in full.
     UwccAlways = 4,
+    /// Sea-thru on a range map from a depth model, supplied by the caller (`seathru`).
+    SeaThruDepth = 5,
 }
 
 impl Algorithm {
-    pub const ALL: [Algorithm; 5] =
-        [Algorithm::Uwcc, Algorithm::Matrix, Algorithm::Ancuti, Algorithm::SeaThru, Algorithm::UwccAlways];
+    pub const ALL: [Algorithm; 6] = [
+        Algorithm::Uwcc,
+        Algorithm::Matrix,
+        Algorithm::Ancuti,
+        Algorithm::SeaThru,
+        Algorithm::UwccAlways,
+        Algorithm::SeaThruDepth,
+    ];
 
     pub fn from_id(id: u32) -> Option<Algorithm> {
         Algorithm::ALL.into_iter().find(|a| *a as u32 == id)

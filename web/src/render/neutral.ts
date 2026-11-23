@@ -34,6 +34,8 @@ export async function pickNeutral(
   v: number,
   correction: Float32Array,
   strength: number,
+  /** The range map in use, when it is not the one estimated from colour. */
+  fixedRange?: Float32Array,
 ): Promise<[number, number, number]> {
   const side = Math.max(3, Math.round(Math.min(width, height) * PATCH_SHARE));
   const x = Math.min(Math.max(Math.round(u * width - side / 2), 0), Math.max(0, width - side));
@@ -46,7 +48,7 @@ export async function pickNeutral(
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(source, x, y, Math.min(side, width), Math.min(side, height), 0, 0, out, out);
   const patch = new Uint8Array(ctx.getImageData(0, 0, out, out).data.buffer);
-  const range = usesRange(correction) ? sampleRange(await rangeMapOf(source, width, height), u, v) : 0.5;
+  const range = usesRange(correction) ? sampleRange(fixedRange ?? await rangeMapOf(source, width, height), u, v) : 0.5;
   const gains = await neutralGains(patch, correction, strength, range);
   if (gains.length !== 3) throw new Error('That spot is too dark or too bright to read its colour. Pick another one.');
   return [gains[0], gains[1], gains[2]];

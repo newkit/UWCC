@@ -22,8 +22,11 @@
 //! Differences from the paper, all forced by what the app has to work with:
 //!
 //! - **Range is estimated, not measured.** The paper uses range maps from
-//!   stereo or structure from motion; here the range comes from a prior on a
-//!   single image (`range`). This is the largest deviation and bounds the quality.
+//!   stereo or structure from motion. Here the range comes from a single
+//!   image: either a prior on its colours (`RangeMap::from_srgb8`), or the
+//!   relative depth of a monocular depth model, anchored to an assumed near
+//!   and far distance (`RangeMap::from_disparity`). Neither gives true
+//!   metres. This is the largest deviation and bounds the quality.
 //! - Input is 8-bit sRGB JPEG or video, linearised, not linear RAW.
 //! - The attenuation fit minimises the error in `beta_D` on range-binned
 //!   medians; the paper minimises the error of the range reconstructed from
@@ -76,12 +79,18 @@ const MAX_BALANCE: f32 = 8.0;
 const WHITE_PERCENTILE: f32 = 99.5;
 const WHITE_LEVEL: f32 = 0.68;
 
-/// Analyse an RGBA8 sRGB image.
+/// Analyse an RGBA8 sRGB image, with the range estimated from its colours.
 pub fn analyze(rgba: &[u8], width: usize, height: usize) -> Analysis {
+    analyze_with_range(rgba, width, height, &RangeMap::from_srgb8(rgba, width, height))
+}
+
+/// Analyse an RGBA8 sRGB image whose range map is given, for example one
+/// made from a depth model's output (`RangeMap::from_disparity`). The same
+/// map must be used when the correction is applied.
+pub fn analyze_with_range(rgba: &[u8], width: usize, height: usize, map: &RangeMap) -> Analysis {
     if width == 0 || height == 0 || rgba.len() < width * height * 4 {
         return Analysis::NEUTRAL;
     }
-    let map = RangeMap::from_srgb8(rgba, width, height);
 
     // Working copy: linear light, block-averaged.
     let k = width.max(height).div_ceil(WORK_MAX).max(1);

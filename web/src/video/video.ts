@@ -89,12 +89,13 @@ export async function prepareVideo(file: Blob, name: string): Promise<{ analysis
       const pixels = new Uint8Array(ctx.getImageData(0, 0, canvas.width, canvas.height).data.buffer.slice(0));
       firstPixels ??= pixels;
       keyTimes.push(time);
-      analyses.push(await analyze(pixels, canvas.width, canvas.height));
+      // Every method, with range from colour: the depth model is too slow to run on every frame of a clip.
+      analyses.push(await analyze(pixels, canvas.width, canvas.height, true));
     }
     if (analyses.length === 0 || !firstPixels) throw new Error(`No frames could be decoded from "${name}".`);
 
     const keys = Object.fromEntries(ALGORITHMS.map(({ id }) => [
-      id, { times: keyTimes, corrections: smooth(analyses.map((a) => a[id].correction)) },
+      id, { times: keyTimes, corrections: smooth(analyses.map((a) => a[id]!.correction)) },
     ])) as Record<Algorithm, VideoKeys>;
     ctx.putImageData(new ImageData(new Uint8ClampedArray(firstPixels), canvas.width, canvas.height), 0, 0);
 

@@ -389,6 +389,7 @@ pixel's range; apply a 3x4 matrix; then the manual adjustments as before.
 | Hue-shift matrix | The idea of the GPL tools in §6.3. There is no paper | Red borrowed from green and blue by rotating the hue (the standard hue-rotation matrix of the W3C Filter Effects specification) until mean red reaches 60/255, at most 120 degrees; then each channel stretched between its 0.5th and 99.5th percentile. On encoded values | Written from the description in §6.3, not from the GPL sources; constants and the choice of levels are UWCC's, so results differ from those tools |
 | Ancuti white balance | Ancuti, Ancuti, De Vleeschouwer, Bekaert: "Color Balance and Fusion for Underwater Image Enhancement", IEEE TIP 2018 | The white-balance stage: red compensation `r + (mean_g - mean_r)(1 - r) g`, blue compensation in green water, grey-world gains. On encoded values | The multi-scale fusion (gamma-corrected and sharpened inputs blended over Laplacian pyramids): spatial, not per-pixel |
 | Sea-thru (estimated range) | Akkaynak, Treibitz: "Sea-thru: A Method for Removing Water from Underwater Images", CVPR 2019 | The paper's image formation model and estimation steps: backscatter fitted to the darkest 1 % of pixels in ten range bins; illuminant by local space average colour among neighbours of similar range; attenuation coefficient as a two-term exponential of range; recovery and grey-world balance. In linear light | **The range map.** The paper measures range with stereo or structure from motion. UWCC has one image and estimates relative range from colour (below). Also: 8-bit JPEG or video instead of linear RAW; a simpler attenuation fit; caps on the gains. Listed at the top of `core/src/seathru.rs` |
+| Sea-thru (depth model) | The same, with range from a monocular depth network: Yang et al., "Depth Anything V2", 2024 (Small model, Apache-2.0) | As above, on a range map made from the network's output (below). Photos only | For video it falls back to the range estimated from colour: the network is too slow to run on every frame. The network gives relative depth, not metres |
 
 **Estimated range** (`core/src/range.rs`). After the underwater light
 attenuation prior of Song et al. 2018: range grows with max(green, blue) and
@@ -402,6 +403,28 @@ written from memory of the paper and were not re-checked against it. The
 consequences are plain: where red is completely absent the map is flat and
 Sea-thru reduces to a global correction; a subject that is red by nature
 reads as near.
+
+**Range from the depth model** (`web/src/depth/`, `RangeMap::from_disparity`).
+The network (27 MB, 8-bit quantised ONNX, run with onnxruntime-web on one
+WASM thread) is served from the app's own origin and loaded the first time
+the method is chosen; nothing leaves the device. It is fetched at build time
+by `web/scripts/fetch-model.mjs`, pinned to a revision and checked by hash,
+because it is too large for the repository. A photo is analysed with it only
+when the method is chosen for that photo (about 1 to 2.5 s on a desktop CPU
+at 378 px on the long side). The network returns relative inverse depth with
+unknown scale and shift, so the map is anchored by assumption: the nearest
+1 % of the frame is taken as 1 m away, the farthest 1 % as 10 m, reciprocal
+in between. The map is stored with the item at up to 160 cells per side and
+used for preview, thumbnail and export alike.
+
+What it changes, by eye on the contact sheet: the depth maps themselves are
+plausible on all seven test images (subjects separate cleanly from open
+water). On the clip the result is close to the colour-based variant, with a
+little more colour in the distance. On the deep photos it does not help:
+with red absent the model has nothing to restore, and where the map says
+"far" (open water behind the dolphins) nearly everything is removed as
+backscatter and the remainder amplified, which gives dark, noisy water.
+That is the method's behaviour without a signal, not a fault of the depth.
 
 **Range in the pipeline.** The map is a small float texture. The shader
 interpolates it by hand so that GPU and CPU agree, and export tiles pass
@@ -450,8 +473,8 @@ CPU reference from a small uncorrected copy kept with the item, and again
 whenever the item's method or adjustments change (after leaving the editor,
 or at once for "apply to all").
 
-Not done: a real depth source (a depth-estimation model, or depth from
-dual-camera phones), and the fusion stage of Ancuti et al.
+Not done: depth from the model for video, measured depth (dual-camera
+phones), the model on the GPU (WebGPU), and the fusion stage of Ancuti et al.
 
 ## 7. Batch processing and output location
 
@@ -657,6 +680,9 @@ Status on 2026-11-23:
   CPU reference to within 1 of 255 on every branch of the pipeline, in a
   software-rendered browser. Verified headless on photos (including a
   multi-tile export) and on the owner's clip. Not verified on real GPUs.
+- Sea-thru on a depth model (§6.7): done for photos, verified headless
+  (model loaded on first use only, preview, export, batch, thumbnails).
+  Not verified: speed and memory on phones.
 - Neutral picker (F7) and the "UWCC, always applied" method as manual
   override (§6.7): done, verified headless on photos and a clip.
 - Default-method setting and thumbnails that follow each item's method and

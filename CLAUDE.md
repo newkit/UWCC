@@ -19,7 +19,7 @@ for mobile with Capacitor. Progress per milestone is listed at the end of
 ## Layout
 
 - `core/` - Rust crate `uwcc-core`: parameter model, CPU reference implementation, WASM bindings, and one module per correction method: `analysis` (UWCC's own, the default; also its always-applied variant), `matrix`, `ancuti`, `seathru` (with `range`, the estimated range map it needs). `examples/sheet.rs` renders all methods side by side.
-- `web/` - the app: React + TypeScript + Vite. `src/render/` shader and renderer, `src/worker/` WASM core and JPEG encoder off the main thread, `src/io/` sources, import, export and output targets, `src/batch/` the job queue, `src/video/` clip analysis and WebCodecs export (loaded on demand; keep `mediabunny` imports inside `video.ts`), `src/settings/` persisted settings, `src/ui/` components.
+- `web/` - the app: React + TypeScript + Vite. `src/render/` shader and renderer, `src/worker/` WASM core and JPEG encoder off the main thread, `src/io/` sources, import, export and output targets, `src/batch/` the job queue, `src/depth/` the depth model for the Sea-thru variant that uses one (loaded on demand, in its own worker; fetched into `public/models/` by `scripts/fetch-model.mjs`, not committed), `src/video/` clip analysis and WebCodecs export (loaded on demand; keep `mediabunny` imports inside `video.ts`), `src/settings/` persisted settings, `src/ui/` components.
 - `spike/m0/` - throwaway device test page for M0. Do not build the app on it.
 - `testdata/photos/` - reference pairs used by the core's tests and as in-app samples. `testdata/local/` is git-ignored.
 
@@ -72,7 +72,7 @@ Expect 0 or 1; `cases` in the result gives the difference per branch of the pipe
 - The single-item editor and batch runs share one path: every file is a job in `web/src/batch/queue.ts`, analysed through `loadAnalysisCopy` and exported through `process`. Do not add a second analysis or export path.
 - Every JPEG written goes through `tagJpeg` (`web/src/io/jpegMarker.ts`); the marker is what prevents correcting a file twice.
 - Never modify or replace a source file unless the overwrite setting is on, and then only after the result was fully written and checked (`SPECIFICATION.md` §7.3). Never delete source files.
-- The app is standalone with no backend: all processing is on-device. Do not add network calls, server components, analytics or telemetry, and do not load code, fonts or assets from CDNs at runtime.
+- The app is standalone with no backend: all processing is on-device. Do not add network calls, server components, analytics or telemetry, and do not load code, fonts or assets from CDNs at runtime. Large assets that cannot live in the repository (the depth model) are fetched at build time, pinned and hash-checked, and served from the app's own origin.
 
 ## Licensing
 

@@ -42,10 +42,18 @@ export const ALGORITHMS = [
   { id: 'ancuti', core: 2, label: 'Ancuti white balance' },
   { id: 'seathru', core: 3, label: 'Sea-thru (estimated range)' },
   { id: 'uwccAlways', core: 4, label: 'UWCC, always applied' },
+  { id: 'seathruDepth', core: 5, label: 'Sea-thru (depth model)' },
 ] as const;
 
 export type Algorithm = (typeof ALGORITHMS)[number]['id'];
 export const DEFAULT_ALGORITHM: Algorithm = 'uwcc';
+
+/**
+ * Methods that take their range map from the depth model. The model is large
+ * and slow next to everything else, so these are analysed only when chosen,
+ * and for photos only: a video uses the range estimated from colour instead.
+ */
+export const usesDepthModel = (algorithm: Algorithm) => algorithm === 'seathruDepth';
 
 /** Samples per range table in a correction (`RANGE_NODES` in the core). */
 export const RANGE_NODES = 8;
@@ -70,8 +78,11 @@ export type Analysis = {
   strength: number;
 };
 
-/** One analysis per method, so switching method needs no new analysis. */
-export type Analyses = Record<Algorithm, Analysis>;
+/**
+ * One analysis per method, so switching method needs no new analysis.
+ * Methods that need the depth model are missing until they were chosen once.
+ */
+export type Analyses = Partial<Record<Algorithm, Analysis>>;
 
 export const IDENTITY_CORRECTION = new Float32Array(CORRECTION_LEN);
 IDENTITY_CORRECTION.set([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0]);

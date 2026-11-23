@@ -6,14 +6,16 @@
   "license": "MIT OR Apache-2.0",
   "scripts": {
     "build:core": "wasm-pack build ../core --target web --release --out-dir ../web/src/core-pkg --out-name uwcc_core --no-pack",
-    "dev": "npm run build:core && vite",
+    "dev": "npm run fetch:model && npm run build:core && vite",
     "typecheck": "tsc --noEmit",
-    "build": "npm run build:core && tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "build": "npm run fetch:model && npm run build:core && tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "fetch:model": "node scripts/fetch-model.mjs"
   },
   "dependencies": {
     "@jsquash/jpeg": "^1.6.0",
     "mediabunny": "^1.66.2",
+    "onnxruntime-web": "^1.31.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },

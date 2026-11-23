@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { alreadyCorrected, createJob, isCancel, type Job, prepare, process, renderThumb, thumbKey } from '../batch/queue';
+import { alreadyCorrected, createJob, currentAnalysis, isCancel, type Job, needsDepth, prepare, prepareDepth, process, renderThumb, thumbKey } from '../batch/queue';
 import { fromDirectory, fromDrop, fromFiles, fsAccess, pickFiles, pickFolder, pickOutputFolder, type Source } from '../io/sources';
 import type { Adjustments, Algorithm } from '../model';
 import { type Settings, useSettings } from '../settings/settings';
@@ -118,7 +118,7 @@ export function App() {
     const current = settingsRef.current;
     // Photos first, so quick results appear early; then videos.
     const targets = jobsRef.current
-      .filter((j) => ids.includes(j.id) && j.analysis)
+      .filter((j) => ids.includes(j.id) && (j.video || currentAnalysis(j)))
       .sort((a, b) => Number(!!a.video) - Number(!!b.video));
     if (targets.length === 0) return;
     if (current.outputMode === 'overwrite' && !confirmed && targets.some((j) => j.source.handle)) {
@@ -200,6 +200,31 @@ export function App() {
 
   useEffect(() => { void removeStaleTempFiles(); }, []);
 
+  // Methods that take their range from the depth model are analysed when first chosen for a photo.
+  const depthPending = useRef(new Set<number>());
+  useEffect(() => {
+    for (const job of jobs) {
+      if (!needsDepth(job) || !['ready', 'done', 'failed'].includes(job.status) || depthPending.current.has(job.id)) continue;
+      depthPending.current.add(job.id);
+      const algorithm = job.algorithm;
+      patch(job.id, { status: 'analyzing', message: 'Estimating depth… (the first time, a 27 MB model is loaded)' });
+      prepChain.current = prepChain.current.then(async () => {
+        const ready = { status: 'ready', message: undefined } as const;
+        try {
+          if (removed.current.has(job.id)) return;
+          const { analysis, depthRange } = await prepareDepth(job.source, algorithm);
+          setJobs((list) => list.map((j) => (j.id === job.id ? { ...j, ...ready, depthRange, analysis: { ...j.analysis, [algorithm]: analysis } } : j)));
+        } catch (e) {
+          // Back to a method that needs no model, so that the file stays usable.
+          patch(job.id, { ...ready, algorithm: 'seathru' });
+          setError(`${job.source.name}: depth could not be estimated (${text(e)}). Using "Sea-thru (estimated range)" instead.`);
+        } finally {
+          depthPending.current.delete(job.id);
+        }
+      });
+    }
+  }, [jobs, patch]);
+
   // Thumbnails show the method and adjustments of their file. They are rendered
   // again when those change, but not for the file being edited until it is left.
   const thumbsPending = useRef(new Set<string>());
@@ -208,6 +233,7 @@ export function App() {
       const key = thumbKey(job);
       const tag = `${job.id}/${key}`;
       if (!job.thumbSource || job.id === editing || job.thumbKey === key || thumbsPending.current.has(tag)) continue;
+      if (!job.video && !currentAnalysis(job)) continue; // still waiting for the depth model
       thumbsPending.current.add(tag);
       prepChain.current = prepChain.current.then(async () => {
         try {

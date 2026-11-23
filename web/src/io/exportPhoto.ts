@@ -18,6 +18,8 @@ export async function exportPhoto(
   quality: number,
   onProgress: (fraction: number, stage: 'render' | 'encode') => void,
   signal?: AbortSignal,
+  /** The range map to use for corrections that need one; estimated from the photo's colours when absent. */
+  range?: Float32Array,
 ): Promise<Blob> {
   const checkCancelled = () => {
     if (signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
@@ -32,7 +34,7 @@ export async function exportPhoto(
     } catch {
       throw new Error('Not enough memory to export this photo at full resolution on this device.');
     }
-    if (usesRange(correction)) renderer.setRange(await rangeMapOf(bitmap, W, H));
+    if (usesRange(correction)) renderer.setRange(range ?? await rangeMapOf(bitmap, W, H));
     const tile = new Uint8Array(TILE * TILE * 4);
     for (let y = 0; y < H; y += TILE) {
       checkCancelled();
