@@ -1,0 +1,27 @@
+{
+  "name": "uwcc-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "license": "MIT OR Apache-2.0",
+  "scripts": {
+    "build:core": "wasm-pack build ../core --target web --release --out-dir ../web/src/core-pkg --out-name uwcc_core --no-pack",
+    "dev": "npm run build:core && vite",
+    "typecheck": "tsc --noEmit",
+    "build": "npm run build:core && tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@jsquash/jpeg": "^1.6.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8",
+    "wasm-pack": "^0.15.1"
+  }
+}

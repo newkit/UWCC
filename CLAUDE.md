@@ -13,8 +13,15 @@ design decisions, and update it when a decision changes.
 
 The stack is confirmed by the owner (`SPECIFICATION.md` §5): a TypeScript web
 app with WebGL2 and WebCodecs, a Rust core compiled to WebAssembly, packaged
-for mobile with Capacitor. Current milestone: M0, the device spike, in
-`spike/m0/`. Spike code is throwaway; do not build the real app on top of it.
+for mobile with Capacitor. Progress per milestone is listed at the end of
+`SPECIFICATION.md` §9; keep that list current.
+
+## Layout
+
+- `core/` - Rust crate `uwcc-core`: analysis, parameter model, CPU reference implementation, WASM bindings.
+- `web/` - the app: React + TypeScript + Vite. `src/render/` shader and renderer, `src/worker/` WASM core and JPEG encoder off the main thread, `src/io/` import and export, `src/ui/` components.
+- `spike/m0/` - throwaway device test page for M0. Do not build the app on it.
+- `testdata/photos/` - reference pairs used by the core's tests and as in-app samples. `testdata/local/` is git-ignored.
 
 ## Repository and release
 
@@ -23,23 +30,38 @@ for mobile with Capacitor. Current milestone: M0, the device spike, in
 
 ## Commands
 
-To be filled in once the project is scaffolded. Expected:
+Rust comes from rustup (`rust-toolchain.toml` pins stable plus the
+`wasm32-unknown-unknown` target). In a fresh shell run `. "$HOME/.cargo/env"`
+first if `cargo` resolves to the system one in `/usr/bin`.
 
 ```
-cargo test            # in core/
-wasm-pack build       # in core/
-npm install           # in web/
-npm run dev
-npm test
-npm run build
-npx cap sync          # mobile projects
+# core/
+cargo test                                  # unit tests + reference-image regression tests
+cargo test --test reference_images -- --nocapture   # prints the error against each target
+cargo fmt && cargo clippy --all-targets -- -D warnings
+
+# web/
+npm install
+npm run dev          # builds the core to WASM, then starts Vite
+npm run typecheck
+npm run build        # core -> WASM, type-check, production build in dist/
 ```
+
+After changing anything in `core/`, rerun `npm run build:core` in `web/`
+(`dev` and `build` do it for you). CI (`.github/workflows/ci.yml`) runs the
+core checks, builds the app and the spike, and deploys to GitHub Pages on
+pushes to `main`.
+
+Checking the shader against the reference: in the running app,
+`await window.uwccSelfTest()` in the browser console returns the largest
+per-channel difference (0-255) between GPU and CPU on a generated image.
+Expect 0 or 1.
 
 ## Architecture rules
 
 - `core/` (Rust) has no browser dependencies and must build and test natively.
 - Per-pixel work belongs in the shader, not in WASM or JavaScript.
-- The shader (`web/src/shaders/correct.frag`) and the Rust reference implement the same maths; change them together and keep the comparison tests passing.
+- The shader (`web/src/render/shader.ts`), the uniform maths in `web/src/model.ts` and the Rust reference (`core/src/reference.rs`) implement the same per-pixel steps; change them together and run the self-test.
 - Edits are non-destructive: parameters applied to the original, baked only at export.
 - Video is streamed frame by frame; never hold a whole clip in memory.
 - Heavy work runs off the main thread.

@@ -1,8 +1,9 @@
-name: Deploy to GitHub Pages
+name: Test and deploy
 
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -11,7 +12,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  group: pages-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -23,8 +24,23 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: spike/m0/package-lock.json
-      - name: Build M0 spike
+          cache-dependency-path: |
+            web/package-lock.json
+            spike/m0/package-lock.json
+      - name: Rust toolchain
+        run: rustup show
+      - name: Core - format, lint, test
+        working-directory: core
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+          cargo test
+      - name: Web app - build
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+      - name: M0 spike - build
         working-directory: spike/m0
         run: |
           npm ci
@@ -32,13 +48,14 @@ jobs:
       - name: Assemble site
         run: |
           mkdir -p _site/spike/m0
+          cp -r web/dist/. _site/
           cp -r spike/m0/dist/. _site/spike/m0/
-          cp site/index.html _site/index.html
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
 
   deploy:
+    if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
     environment:

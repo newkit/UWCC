@@ -143,10 +143,11 @@ fails on both, Flutter with native video becomes the better choice.
 | Concern | Choice |
 |---------|--------|
 | UI | TypeScript, React, Vite |
-| Core (analysis, parameters, CPU reference, photo codec, EXIF) | Rust, compiled to WASM with wasm-bindgen; run in a Web Worker |
+| Core (analysis, parameters, CPU reference) | Rust, compiled to WASM with wasm-bindgen (built with wasm-pack); run in a Web Worker |
+| JPEG encoding | MozJPEG compiled to WASM (`@jsquash/jpeg`, Apache-2.0), in the same worker |
 | Preview and export rendering | WebGL2, one GLSL ES 3.0 fragment shader (WebGPU can come later) |
 | Video decode / encode | WebCodecs |
-| Video container demux / mux | A maintained JS library, chosen in M0 |
+| Video container demux / mux | Mediabunny (MPL-2.0, used unmodified) |
 | Video preview | `<video>` element as shader input |
 | Mobile packaging | Capacitor (iOS, Android); plugins for gallery save and share |
 | Source repository | `github.com/newkit/UWCC` (public) |
@@ -316,6 +317,28 @@ green/blue ratio and low detail), and the balance taken from the nearer,
 brighter scene content. Three pairs, all deep-blue water without red, are
 still too few to tune on.
 
+**Implemented method** (`core/src/analysis.rs`, constants at the top of the
+file). In linear light, on a copy of about 256 px:
+
+1. Red health: mean red relative to mean green. At half of green or more,
+   red counts as healthy and the whole correction scales to nothing.
+2. Water colour: the 2nd percentile of the green/blue ratio.
+3. Rebuilt red: green minus 1.5 x that ratio x blue.
+4. Black points: 20th percentile for rebuilt red (so open water and deep
+   shadows get no red), 0.5th for green and blue.
+5. Channel balance on scene content only: pixels are weighted by where their
+   green/blue ratio lies between water and scene; open water gets weight 0.
+6. Common white level (scene highlights to 0.68 linear), gains capped at 8.
+
+Mean error against the targets, per channel RMS on 0..1 sRGB values, with the
+uncorrected original in brackets: turtle 0.023 (0.235), dolphins 0.035
+(0.299), coral 0.048 (0.236). The flash photo is left unchanged. These numbers
+are regression thresholds in `core/tests/reference_images.rs`.
+
+Caveat: the constants were tuned on these three pairs, all deep-blue water
+from similar conditions. They are a starting point and will need revisiting
+with green water, shallow shots and partially depleted red.
+
 ### 6.6 Validation plan (M1)
 
 1. Collect real examples: unedited originals, covering shallow and deep, blue
@@ -414,18 +437,19 @@ Consequences:
 
 ```
 core/                Rust crate -> WASM (also runs natively for tests)
-  src/analysis/        statistics -> CorrectionParams
-  src/model/           CorrectionParams, Adjustments
-  src/reference/       CPU implementation of the shader maths
-  src/photo/           JPEG/PNG decode, tiled encode, EXIF
+  src/analysis.rs      statistics -> Correction
+  src/model.rs         Correction, Adjustments
+  src/reference.rs     CPU implementation of the shader maths
+  src/wasm.rs          JavaScript bindings
+  tests/               regression tests against testdata/photos
 web/                 TypeScript app
-  src/render/          WebGL2 setup, shader, uniforms, tiled photo export
-  src/video/           demux, WebCodecs decode/encode, mux, export loop
-  src/batch/           job queue, run loop, summary
-  src/io/              source handles and output targets per platform, behind interfaces
-  src/settings/        persisted settings
+  src/render/          WebGL2 renderer and the correction shader
+  src/worker/          WASM core and JPEG encoder off the main thread
+  src/io/              import, export; later: source handles and output targets per platform
   src/ui/              screens and components
-  src/shaders/correct.frag
+  src/video/           (planned) demux, WebCodecs decode/encode, mux, export loop
+  src/batch/           (planned) job queue, run loop, summary
+  src/settings/        (planned) persisted settings
 mobile/              Capacitor iOS and Android projects
   plugins/media/       native media plugin (Swift, Kotlin): library access, save next to source, in-place edit
 testdata/
@@ -433,8 +457,8 @@ testdata/
   local/               private examples, git-ignored
 ```
 
-Photo export: decode (WASM) → tiles through WebGL → tiled JPEG encode with
-EXIF (WASM).
+Photo export: decode (browser) → tiles through WebGL → one JPEG encoded in
+WASM (MozJPEG) in the worker; EXIF copied from the source (not implemented yet).
 
 Video export: demux → `VideoDecoder` → frame as texture → shader →
 `VideoEncoder` → mux, with audio packets copied through untouched. Frames are
@@ -466,6 +490,20 @@ Rules:
 | M6 | Mobile apps | Capacitor builds with the native media plugin: multi-select from the library, save next to source, in-place edit, share |
 | M7 | Polish | Performance targets met, accessibility, localisation scaffolding, icons, offline PWA |
 | M8 | Release | Web deployed; TestFlight and Play internal testing |
+
+Status on 2026-11-23:
+
+- M0: test page published at `/spike/m0/`; waiting for reports from real
+  phones. The Capacitor wrapper and native file access are not started.
+- M1: done for the available reference images (§6.5). The shader matches the
+  CPU reference exactly in a software-rendered browser; real GPUs still to
+  be checked through the in-app self-test.
+- M2: first version live: open or drop a photo, automatic correction, six
+  manual controls with reset, split view, hold for original. Missing: zoom
+  and pan, neutral picker.
+- M3: full-resolution tiled JPEG export works. Missing: EXIF metadata is not
+  copied yet, quality is fixed at 92, PNG output.
+- M4 onwards: not started.
 
 ## 10. Risks
 
