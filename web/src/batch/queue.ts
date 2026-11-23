@@ -6,10 +6,10 @@ import { loadAnalysisCopy } from '../io/importPhoto';
 import { isTaggedJpeg } from '../io/jpegMarker';
 import { deliver, isProcessedName, type WriteResult } from '../io/output';
 import type { Source } from '../io/sources';
-import { type Adjustments, type Algorithm, type Analyses, type Analysis, DEFAULT_ADJUSTMENTS, DEFAULT_ALGORITHM, packParams } from '../model';
+import { type Adjustments, type Algorithm, type Analyses, type Analysis, CONTROLS, DEFAULT_ADJUSTMENTS, packParams, usesRange } from '../model';
 import type { Settings } from '../settings/settings';
 import type { VideoMeta } from '../video/video';
-import { analyze, applyReference } from '../worker/client';
+import { analyze, applyReference, rangeMap } from '../worker/client';
 
 export type JobStatus =
   | 'analyzing'   // waiting for or running the automatic analysis
@@ -32,8 +32,11 @@ export type Job = {
   adjustments: Adjustments;
   /** Videos only: the correction over time (per method), and clip facts. */
   video?: VideoMeta;
-  /** Corrected thumbnail (data URL). */
+  /** Small uncorrected copy (data URL) the thumbnail is rendered from. */
+  thumbSource?: string;
+  /** Corrected thumbnail (data URL), and the method and adjustments it shows (`thumbKey`). */
   thumb?: string;
+  thumbKey?: string;
   width?: number;
   height?: number;
   /** 0..1 while running. */
@@ -44,7 +47,7 @@ export type Job = {
 let nextId = 1;
 
 export function createJob(source: Source, settings: Settings): Job {
-  const job: Job = { id: nextId++, source, status: 'analyzing', algorithm: DEFAULT_ALGORITHM, adjustments: DEFAULT_ADJUSTMENTS };
+  const job: Job = { id: nextId++, source, status: 'analyzing', algorithm: settings.defaultAlgorithm, adjustments: DEFAULT_ADJUSTMENTS };
   if (source.kind === 'other') return { ...job, status: 'unsupported', message: 'Not a photo or video.' };
   if (settings.skipProcessed && isProcessedName(source.name, settings.suffix)) {
     return { ...job, status: 'skipped', message: 'Already corrected by UWCC.' };
@@ -64,17 +67,56 @@ export async function alreadyCorrected(source: Source): Promise<boolean> {
   return isTaggedJpeg(source.file);
 }
 
-/** Automatic analysis plus a corrected thumbnail. */
-export async function prepare(source: Source): Promise<Pick<Job, 'analysis' | 'video' | 'thumb' | 'width' | 'height'>> {
-  if (source.kind === 'video') return (await videoModule()).prepareVideo(source.file, source.name);
-  const copy = await loadAnalysisCopy(source.file, source.name);
-  const analysis = await analyze(copy.pixels, copy.width, copy.height);
-  const corrected = await applyReference(copy.pixels.slice(), copy.width, packParams(analysis[DEFAULT_ALGORITHM].correction, DEFAULT_ADJUSTMENTS));
+/** Identifies what a thumbnail shows, so that it is rendered again when the method or an adjustment changes. */
+export const thumbKey = (job: Pick<Job, 'algorithm' | 'adjustments'>) =>
+  `${job.algorithm}:${CONTROLS.map((c) => job.adjustments[c.key]).join(',')}`;
+
+/** The job's thumbnail with its current method and adjustments (for a video: of the first frame). */
+export async function renderThumb(job: Pick<Job, 'thumbSource' | 'analysis' | 'video' | 'algorithm' | 'adjustments'>): Promise<string> {
+  const correction = job.video ? job.video.keys[job.algorithm].corrections[0] : job.analysis?.[job.algorithm].correction;
+  if (!job.thumbSource || !correction) throw new Error('This file has not been analysed.');
+  const image = new Image();
+  image.src = job.thumbSource;
+  await image.decode();
   const canvas = document.createElement('canvas');
-  canvas.width = copy.width;
-  canvas.height = copy.height;
-  canvas.getContext('2d')!.putImageData(new ImageData(new Uint8ClampedArray(corrected), copy.width, copy.height), 0, 0);
-  return { analysis, thumb: canvas.toDataURL('image/jpeg', 0.8), width: copy.sourceWidth, height: copy.sourceHeight };
+  canvas.width = image.naturalWidth;
+  canvas.height = image.naturalHeight;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+  ctx.drawImage(image, 0, 0);
+  const pixels = new Uint8Array(ctx.getImageData(0, 0, canvas.width, canvas.height).data.buffer);
+  const range = usesRange(correction) ? await rangeMap(pixels, canvas.width, canvas.height) : undefined;
+  const corrected = await applyReference(pixels, canvas.width, packParams(correction, job.adjustments), range);
+  ctx.putImageData(new ImageData(new Uint8ClampedArray(corrected), canvas.width, canvas.height), 0, 0);
+  return canvas.toDataURL('image/jpeg', 0.8);
+}
+
+function toDataUrl(pixels: Uint8Array, width: number, height: number): string {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  canvas.getContext('2d')!.putImageData(new ImageData(new Uint8ClampedArray(pixels), width, height), 0, 0);
+  return canvas.toDataURL('image/jpeg', 0.9);
+}
+
+/** Automatic analysis plus a thumbnail corrected by the given method. */
+export async function prepare(
+  source: Source,
+  algorithm: Algorithm,
+): Promise<Pick<Job, 'analysis' | 'video' | 'thumbSource' | 'thumb' | 'thumbKey' | 'width' | 'height'>> {
+  let found: Pick<Job, 'analysis' | 'video' | 'thumbSource' | 'width' | 'height'>;
+  if (source.kind === 'video') {
+    found = await (await videoModule()).prepareVideo(source.file, source.name);
+  } else {
+    const copy = await loadAnalysisCopy(source.file, source.name);
+    found = {
+      analysis: await analyze(copy.pixels, copy.width, copy.height),
+      thumbSource: toDataUrl(copy.pixels, copy.width, copy.height),
+      width: copy.sourceWidth,
+      height: copy.sourceHeight,
+    };
+  }
+  const shown = { algorithm, adjustments: DEFAULT_ADJUSTMENTS };
+  return { ...found, thumb: await renderThumb({ ...found, ...shown }), thumbKey: thumbKey(shown) };
 }
 
 /** Correct one photo or video at full resolution and deliver the result. */

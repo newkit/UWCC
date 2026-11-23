@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { alreadyCorrected, createJob, isCancel, type Job, prepare, process } from '../batch/queue';
+import { alreadyCorrected, createJob, isCancel, type Job, prepare, process, renderThumb, thumbKey } from '../batch/queue';
 import { fromDirectory, fromDrop, fromFiles, fsAccess, pickFiles, pickFolder, pickOutputFolder, type Source } from '../io/sources';
 import type { Adjustments, Algorithm } from '../model';
 import { type Settings, useSettings } from '../settings/settings';
@@ -85,7 +85,7 @@ export function App() {
             patch(job.id, { status: 'skipped', message: 'Already corrected by UWCC.' });
             return;
           }
-          patch(job.id, { ...(await prepare(job.source)), status: 'ready' });
+          patch(job.id, { ...(await prepare(job.source, job.algorithm)), status: 'ready' });
         } catch (e) {
           patch(job.id, { status: 'unsupported', message: text(e) });
         }
@@ -199,6 +199,27 @@ export function App() {
   }, [addSources]);
 
   useEffect(() => { void removeStaleTempFiles(); }, []);
+
+  // Thumbnails show the method and adjustments of their file. They are rendered
+  // again when those change, but not for the file being edited until it is left.
+  const thumbsPending = useRef(new Set<string>());
+  useEffect(() => {
+    for (const job of jobs) {
+      const key = thumbKey(job);
+      const tag = `${job.id}/${key}`;
+      if (!job.thumbSource || job.id === editing || job.thumbKey === key || thumbsPending.current.has(tag)) continue;
+      thumbsPending.current.add(tag);
+      prepChain.current = prepChain.current.then(async () => {
+        try {
+          if (!removed.current.has(job.id)) patch(job.id, { thumb: await renderThumb(job), thumbKey: key });
+        } catch {
+          // The previous thumbnail stays.
+        } finally {
+          thumbsPending.current.delete(tag);
+        }
+      });
+    }
+  }, [jobs, editing, patch]);
 
   // Hook for automated tests: add a folder without going through the system picker.
   useEffect(() => {

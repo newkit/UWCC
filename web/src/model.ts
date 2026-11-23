@@ -29,7 +29,7 @@ export const CONTROLS: ControlSpec[] = [
 
 /** The selectable correction methods. `core` is the id the WASM core knows the method by. */
 export const ALGORITHMS = [
-  { id: 'uwcc', core: 0, label: 'UWCC (default)' },
+  { id: 'uwcc', core: 0, label: 'UWCC' },
   { id: 'matrix', core: 1, label: 'Hue-shift matrix' },
   { id: 'ancuti', core: 2, label: 'Ancuti white balance' },
   { id: 'seathru', core: 3, label: 'Sea-thru (estimated range)' },

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { fsAccess } from '../io/sources';
+import { ALGORITHMS, type Algorithm } from '../model';
 import { cleanSuffix, type Settings } from '../settings/settings';
 
 type Props = { open: boolean; settings: Settings; onChange: (next: Settings) => void; onClose: () => void };
@@ -62,6 +63,14 @@ export function SettingsDialog({ open, settings, onChange, onClose }: Props) {
         <label className="field">
           <span>JPEG quality for photos: {settings.jpegQuality}</span>
           <input type="range" min={60} max={100} step={1} value={settings.jpegQuality} onChange={(e) => onChange({ ...settings, jpegQuality: Number(e.target.value) })} />
+        </label>
+
+        <label className="field">
+          <span>Correction method for new files</span>
+          <select value={settings.defaultAlgorithm} onChange={(e) => onChange({ ...settings, defaultAlgorithm: e.target.value as Algorithm })}>
+            {ALGORITHMS.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
+          </select>
+          <small>Applies to files added from now on. The method can still be changed for each file in the editor.</small>
         </label>
 
         <label className="choice">

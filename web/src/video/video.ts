@@ -6,12 +6,12 @@ import {
   ALL_FORMATS, BlobSource, BufferTarget, Conversion, ConversionCanceledError, Input, Mp4OutputFormat, Output,
   QUALITY_HIGH, StreamTarget, type StreamTargetChunk, VideoSampleSink, canEncodeVideo, type VideoCodec,
 } from 'mediabunny';
-import { ALGORITHMS, type Adjustments, type Algorithm, type Analyses, DEFAULT_ADJUSTMENTS, DEFAULT_ALGORITHM, packParams, usesRange } from '../model';
+import { ALGORITHMS, type Adjustments, type Algorithm, type Analyses, usesRange } from '../model';
 import { rangeMapOf } from '../render/range';
 import { CorrectionRenderer, createWorkCanvas } from '../render/renderer';
 import { TEMP_PREFIX } from '../io/tempFiles';
 import { correctionAt, type VideoKeys } from './keys';
-import { analyze, applyReference } from '../worker/client';
+import { analyze } from '../worker/client';
 
 /** Metadata comment written into every video UWCC produces. */
 const SIGNATURE = 'UWCC corrected';
@@ -54,8 +54,8 @@ export async function isTaggedVideo(file: Blob): Promise<boolean> {
   }
 }
 
-/** Analyse frames across the clip; also returns a corrected thumbnail. */
-export async function prepareVideo(file: Blob, name: string): Promise<{ analysis: Analyses; video: VideoMeta; thumb: string; width: number; height: number }> {
+/** Analyse frames across the clip; also returns a small copy of the first frame for the thumbnail. */
+export async function prepareVideo(file: Blob, name: string): Promise<{ analysis: Analyses; video: VideoMeta; thumbSource: string; width: number; height: number }> {
   const input = open(file);
   try {
     const track = await input.getPrimaryVideoTrack().catch(() => null);
@@ -96,13 +96,12 @@ export async function prepareVideo(file: Blob, name: string): Promise<{ analysis
     const keys = Object.fromEntries(ALGORITHMS.map(({ id }) => [
       id, { times: keyTimes, corrections: smooth(analyses.map((a) => a[id].correction)) },
     ])) as Record<Algorithm, VideoKeys>;
-    const corrected = await applyReference(firstPixels, canvas.width, packParams(keys[DEFAULT_ALGORITHM].corrections[0], DEFAULT_ADJUSTMENTS));
-    ctx.putImageData(new ImageData(new Uint8ClampedArray(corrected), canvas.width, canvas.height), 0, 0);
+    ctx.putImageData(new ImageData(new Uint8ClampedArray(firstPixels), canvas.width, canvas.height), 0, 0);
 
     return {
       analysis: analyses[0],
       video: { keys, duration, codec: codecName, frameRate: stats.averagePacketRate },
-      thumb: canvas.toDataURL('image/jpeg', 0.8),
+      thumbSource: canvas.toDataURL('image/jpeg', 0.9),
       width: track.displayWidth,
       height: track.displayHeight,
     };

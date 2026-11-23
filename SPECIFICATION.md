@@ -63,7 +63,7 @@ photo or video editor.
 | F17 | Settings, stored on the device: output location (next to source / overwrite source), file-name suffix, JPEG quality, video quality. |
 | F18 | Files already produced by UWCC are recognised (metadata tag, and the suffix) and skipped by default, so nothing is corrected twice. |
 | F13 | Zoom and pan in the photo editor. |
-| F19 | The correction method is selectable per item in the editor (§6.7): UWCC's own (default), and re-implementations of published methods for comparison. The choice is applied in preview and export, for photos and videos, and can be applied to all items of a batch. |
+| F19 | The correction method is selectable per item in the editor (§6.7): UWCC's own (default), and re-implementations of published methods for comparison. The choice is applied in preview and export, for photos and videos, and can be applied to all items of a batch. A setting chooses the method new items start with, and queue thumbnails show each item's method and adjustments. |
 
 ## 4. Non-functional requirements
 
@@ -384,7 +384,7 @@ pixel's range; apply a 3x4 matrix; then the manual adjustments as before.
 
 | Method | Source | What is implemented | What is not |
 |--------|--------|---------------------|-------------|
-| UWCC (default) | This project, §6.5 | Everything | |
+| UWCC | This project, §6.5 | Everything | |
 | Hue-shift matrix | The idea of the GPL tools in §6.3. There is no paper | Red borrowed from green and blue by rotating the hue (the standard hue-rotation matrix of the W3C Filter Effects specification) until mean red reaches 60/255, at most 120 degrees; then each channel stretched between its 0.5th and 99.5th percentile. On encoded values | Written from the description in §6.3, not from the GPL sources; constants and the choice of levels are UWCC's, so results differ from those tools |
 | Ancuti white balance | Ancuti, Ancuti, De Vleeschouwer, Bekaert: "Color Balance and Fusion for Underwater Image Enhancement", IEEE TIP 2018 | The white-balance stage: red compensation `r + (mean_g - mean_r)(1 - r) g`, blue compensation in green water, grey-world gains. On encoded values | The multi-scale fusion (gamma-corrected and sharpened inputs blended over Laplacian pyramids): spatial, not per-pixel |
 | Sea-thru (estimated range) | Akkaynak, Treibitz: "Sea-thru: A Method for Removing Water from Underwater Images", CVPR 2019 | The paper's image formation model and estimation steps: backscatter fitted to the darkest 1 % of pixels in ten range bins; illuminant by local space average colour among neighbours of similar range; attenuation coefficient as a two-term exponential of range; recovery and grey-world balance. In linear light | **The range map.** The paper measures range with stereo or structure from motion. UWCC has one image and estimates relative range from colour (below). Also: 8-bit JPEG or video instead of linear RAW; a simpler attenuation fit; caps on the gains. Listed at the top of `core/src/seathru.rs` |
@@ -432,8 +432,13 @@ covered by unit tests on synthetic input (including a scene rendered through
 Sea-thru's own model, which it must turn grey again) and by a check that
 each gives finite parameters and a usable image on the reference photos.
 
-Not done: a default-method setting for new items, thumbnails that follow the
-chosen method, a real depth source (a depth-estimation model, or depth from
+**In the queue.** The setting "Correction method for new files" chooses the
+method items start with (UWCC unless changed). Thumbnails are rendered by the
+CPU reference from a small uncorrected copy kept with the item, and again
+whenever the item's method or adjustments change (after leaving the editor,
+or at once for "apply to all").
+
+Not done: a real depth source (a depth-estimation model, or depth from
 dual-camera phones), and the fusion stage of Ancuti et al.
 
 ## 7. Batch processing and output location
@@ -640,6 +645,8 @@ Status on 2026-11-23:
   CPU reference to within 1 of 255 on every branch of the pipeline, in a
   software-rendered browser. Verified headless on photos (including a
   multi-tile export) and on the owner's clip. Not verified on real GPUs.
+- Default-method setting and thumbnails that follow each item's method and
+  adjustments (F19): done, verified headless.
 - M6 onwards: not started.
 
 ## 10. Risks

@@ -1,6 +1,7 @@
 // User settings, stored on this device only.
 
 import { useCallback, useState } from 'react';
+import { ALGORITHMS, type Algorithm, DEFAULT_ALGORITHM } from '../model';
 
 export type OutputMode = 'next' | 'overwrite';
 
@@ -13,9 +14,11 @@ export type Settings = {
   jpegQuality: number;
   /** Leave out files that already carry the suffix, so nothing is corrected twice. */
   skipProcessed: boolean;
+  /** The correction method files start with when they are added. */
+  defaultAlgorithm: Algorithm;
 };
 
-export const DEFAULT_SETTINGS: Settings = { outputMode: 'next', suffix: '_uwcc', jpegQuality: 92, skipProcessed: true };
+export const DEFAULT_SETTINGS: Settings = { outputMode: 'next', suffix: '_uwcc', jpegQuality: 92, skipProcessed: true, defaultAlgorithm: DEFAULT_ALGORITHM };
 
 const KEY = 'uwcc-settings';
 
@@ -31,6 +34,7 @@ function sanitize(raw: Partial<Settings>): Settings {
     suffix: cleanSuffix(typeof raw.suffix === 'string' ? raw.suffix : DEFAULT_SETTINGS.suffix),
     jpegQuality: Math.min(100, Math.max(60, Math.round(Number(raw.jpegQuality) || DEFAULT_SETTINGS.jpegQuality))),
     skipProcessed: raw.skipProcessed !== false,
+    defaultAlgorithm: ALGORITHMS.find((a) => a.id === raw.defaultAlgorithm)?.id ?? DEFAULT_ALGORITHM,
   };
 }
 
