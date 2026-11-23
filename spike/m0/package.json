@@ -1,0 +1,20 @@
+{
+  "name": "uwcc-spike-m0",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "license": "MIT OR Apache-2.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@jsquash/jpeg": "^1.6.0",
+    "mediabunny": "^1.66.2"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
+  }
+}
