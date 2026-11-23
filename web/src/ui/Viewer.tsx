@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { Adjustments } from '../model';
+import { type Adjustments, usesRange } from '../model';
+import { rangeMapOf } from '../render/range';
 import { CorrectionRenderer } from '../render/renderer';
 
 type Props = {
@@ -26,6 +27,9 @@ export function Viewer({ source, width, height, frame = 0, label, correction, ad
   const uploaded = useRef<{ source: TexImageSource; frame: number } | null>(null);
   const [box, setBox] = useState({ width: 0, height: 0 });
   const [split, setSplit] = useState(0.5);
+  // Counts range maps handed to the renderer, so that the frame is drawn again when one arrives.
+  const [rangeVersion, setRangeVersion] = useState(0);
+  const ranged = usesRange(correction);
 
   // Fit the image inside the available space, keeping its aspect ratio.
   useLayoutEffect(() => {
@@ -49,6 +53,20 @@ export function Viewer({ source, width, height, frame = 0, label, correction, ad
     return () => { rendererRef.current = null; uploaded.current = null; };
   }, [onError]);
 
+  // Corrections that depend on range need a map of the frame on screen. It is
+  // estimated off the main thread, so it arrives a moment after the frame.
+  useEffect(() => {
+    if (!ranged || width === 0 || height === 0) return;
+    const renderer = rendererRef.current;
+    rangeMapOf(source as CanvasImageSource, width, height)
+      .then((map) => {
+        if (rendererRef.current !== renderer || !renderer) return;
+        renderer.setRange(map);
+        setRangeVersion((v) => v + 1);
+      })
+      .catch((error) => onError(error instanceof Error ? error.message : String(error)));
+  }, [ranged, source, width, height, frame, onError]);
+
   useEffect(() => {
     const renderer = rendererRef.current;
     if (!renderer || width === 0 || height === 0) return;
@@ -58,7 +76,7 @@ export function Viewer({ source, width, height, frame = 0, label, correction, ad
     }
     // Left of the split shows the original; a split of 2 puts the whole frame left of it.
     renderer.draw(correction, adjustments, showOriginal ? 2 : compare ? split : null);
-  }, [source, width, height, frame, correction, adjustments, compare, showOriginal, split]);
+  }, [source, width, height, frame, correction, adjustments, compare, showOriginal, split, rangeVersion]);
 
   const drag = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!(event.buttons & 1) && event.pointerType === 'mouse') return;

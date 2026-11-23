@@ -6,7 +6,8 @@ import {
   ALL_FORMATS, BlobSource, BufferTarget, Conversion, ConversionCanceledError, Input, Mp4OutputFormat, Output,
   QUALITY_HIGH, StreamTarget, type StreamTargetChunk, VideoSampleSink, canEncodeVideo, type VideoCodec,
 } from 'mediabunny';
-import { type Adjustments, type Analysis, DEFAULT_ADJUSTMENTS, packParams } from '../model';
+import { ALGORITHMS, type Adjustments, type Algorithm, type Analyses, DEFAULT_ADJUSTMENTS, DEFAULT_ALGORITHM, packParams, usesRange } from '../model';
+import { rangeMapOf } from '../render/range';
 import { CorrectionRenderer, createWorkCanvas } from '../render/renderer';
 import { TEMP_PREFIX } from '../io/tempFiles';
 import { correctionAt, type VideoKeys } from './keys';
@@ -21,7 +22,8 @@ const MAX_KEYS = 60;
 
 export type { VideoKeys };
 
-export type VideoMeta = { keys: VideoKeys; duration: number; codec: string; frameRate: number };
+/** `keys` holds the correction over time for every method. */
+export type VideoMeta = { keys: Record<Algorithm, VideoKeys>; duration: number; codec: string; frameRate: number };
 
 const CODEC_NAMES: Record<string, string> = { avc: 'H.264', hevc: 'HEVC', vp9: 'VP9', av1: 'AV1', vp8: 'VP8', prores: 'ProRes' };
 
@@ -34,8 +36,8 @@ function smooth(corrections: Float32Array[]): Float32Array[] {
   if (corrections.length < 3) return corrections;
   return corrections.map((current, i) => {
     const prev = corrections[Math.max(0, i - 1)], next = corrections[Math.min(corrections.length - 1, i + 1)];
-    const out = new Float32Array(12);
-    for (let k = 0; k < 12; k++) out[k] = 0.25 * prev[k] + 0.5 * current[k] + 0.25 * next[k];
+    const out = new Float32Array(current.length);
+    for (let k = 0; k < current.length; k++) out[k] = 0.25 * prev[k] + 0.5 * current[k] + 0.25 * next[k];
     return out;
   });
 }
@@ -53,7 +55,7 @@ export async function isTaggedVideo(file: Blob): Promise<boolean> {
 }
 
 /** Analyse frames across the clip; also returns a corrected thumbnail. */
-export async function prepareVideo(file: Blob, name: string): Promise<{ analysis: Analysis; video: VideoMeta; thumb: string; width: number; height: number }> {
+export async function prepareVideo(file: Blob, name: string): Promise<{ analysis: Analyses; video: VideoMeta; thumb: string; width: number; height: number }> {
   const input = open(file);
   try {
     const track = await input.getPrimaryVideoTrack().catch(() => null);
@@ -76,7 +78,7 @@ export async function prepareVideo(file: Blob, name: string): Promise<{ analysis
 
     const sink = new VideoSampleSink(track);
     const keyTimes: number[] = [];
-    const analyses: Analysis[] = [];
+    const analyses: Analyses[] = [];
     let firstPixels: Uint8Array | null = null;
     let index = 0;
     for await (const sample of sink.samplesAtTimestamps(times.map((t) => t + start))) {
@@ -87,12 +89,14 @@ export async function prepareVideo(file: Blob, name: string): Promise<{ analysis
       const pixels = new Uint8Array(ctx.getImageData(0, 0, canvas.width, canvas.height).data.buffer.slice(0));
       firstPixels ??= pixels;
       keyTimes.push(time);
-      analyses.push(await analyze(pixels));
+      analyses.push(await analyze(pixels, canvas.width, canvas.height));
     }
     if (analyses.length === 0 || !firstPixels) throw new Error(`No frames could be decoded from "${name}".`);
 
-    const keys: VideoKeys = { times: keyTimes, corrections: smooth(analyses.map((a) => a.correction)) };
-    const corrected = await applyReference(firstPixels, packParams(keys.corrections[0], DEFAULT_ADJUSTMENTS));
+    const keys = Object.fromEntries(ALGORITHMS.map(({ id }) => [
+      id, { times: keyTimes, corrections: smooth(analyses.map((a) => a[id].correction)) },
+    ])) as Record<Algorithm, VideoKeys>;
+    const corrected = await applyReference(firstPixels, canvas.width, packParams(keys[DEFAULT_ALGORITHM].corrections[0], DEFAULT_ADJUSTMENTS));
     ctx.putImageData(new ImageData(new Uint8ClampedArray(corrected), canvas.width, canvas.height), 0, 0);
 
     return {
@@ -169,14 +173,21 @@ export async function exportVideo(
         codec,
         bitrate: bitrate > 0 ? Math.round(bitrate) : QUALITY_HIGH,
         forceTranscode: true,
-        process: (sample) => {
+        process: async (sample) => {
           const frame = sample.toVideoFrame();
-          const w = frame.displayWidth, h = frame.displayHeight;
-          renderer ??= new CorrectionRenderer(createWorkCanvas(w, h));
-          renderer.setSource(frame, w, h);
-          frame.close();
-          renderer.draw(correctionAt(keys, sample.timestamp - start), adjustments);
-          return renderer.canvas;
+          try {
+            const w = frame.displayWidth, h = frame.displayHeight;
+            const correction = correctionAt(keys, sample.timestamp - start);
+            // The range map is the only step that waits; everything on the shared renderer happens after it, in one go.
+            const range = usesRange(correction) ? await rangeMapOf(frame, w, h) : null;
+            renderer ??= new CorrectionRenderer(createWorkCanvas(w, h));
+            if (range) renderer.setRange(range);
+            renderer.setSource(frame, w, h);
+            renderer.draw(correction, adjustments);
+            return renderer.canvas;
+          } finally {
+            frame.close();
+          }
         },
       },
     });

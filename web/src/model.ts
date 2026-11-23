@@ -27,7 +27,30 @@ export const CONTROLS: ControlSpec[] = [
   { key: 'saturation', label: 'Saturation', min: -1, max: 1, step: 0.01, format: (v) => signed(v, 0, '%') },
 ];
 
-/** Result of the automatic analysis. `correction` is row-major 3x4: rows are [fromR, fromG, fromB, offset]. */
+/** The selectable correction methods. `core` is the id the WASM core knows the method by. */
+export const ALGORITHMS = [
+  { id: 'uwcc', core: 0, label: 'UWCC (default)' },
+  { id: 'matrix', core: 1, label: 'Hue-shift matrix' },
+  { id: 'ancuti', core: 2, label: 'Ancuti white balance' },
+  { id: 'seathru', core: 3, label: 'Sea-thru (estimated range)' },
+] as const;
+
+export type Algorithm = (typeof ALGORITHMS)[number]['id'];
+export const DEFAULT_ALGORITHM: Algorithm = 'uwcc';
+
+/** Samples per range table in a correction (`RANGE_NODES` in the core). */
+export const RANGE_NODES = 8;
+
+/**
+ * Number of values in a correction. The layout is that of `Correction::to_array` in the core:
+ * matrix (12), encoded flag, compensation (2), backscatter and log-gain tables (3 x RANGE_NODES each), ranged flag.
+ */
+export const CORRECTION_LEN = 16 + 6 * RANGE_NODES;
+
+/**
+ * Result of the automatic analysis. `correction` starts with a row-major 3x4
+ * matrix (rows are [fromR, fromG, fromB, offset]); see `CORRECTION_LEN`.
+ */
 export type Analysis = {
   correction: Float32Array;
   /** 0 = red is healthy, 1 = red is absent: how much red was rebuilt from green. */
@@ -38,17 +61,25 @@ export type Analysis = {
   strength: number;
 };
 
-export const IDENTITY_CORRECTION = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0]);
+/** One analysis per method, so switching method needs no new analysis. */
+export type Analyses = Record<Algorithm, Analysis>;
+
+export const IDENTITY_CORRECTION = new Float32Array(CORRECTION_LEN);
+IDENTITY_CORRECTION.set([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0]);
+
+/** Does this correction depend on range, so that drawing it needs a range map? */
+export const usesRange = (correction: Float32Array) => correction[CORRECTION_LEN - 1] > 0.5;
 
 export function analysisFromArray(a: Float32Array): Analysis {
-  return { correction: a.slice(0, 12), depletion: a[12], sceneFraction: a[13], waterRatio: a[14], strength: a[15] };
+  const n = CORRECTION_LEN;
+  return { correction: a.slice(0, n), depletion: a[n], sceneFraction: a[n + 1], waterRatio: a[n + 2], strength: a[n + 3] };
 }
 
-/** Flat parameter block for the core's reference implementation: matrix (12) + adjustments (6). */
+/** Flat parameter block for the core's reference implementation: correction + adjustments (6). */
 export function packParams(correction: Float32Array, a: Adjustments): Float32Array {
-  const p = new Float32Array(18);
-  p.set(correction.subarray(0, 12));
-  p.set([a.strength, a.temperature, a.tint, a.exposure, a.contrast, a.saturation], 12);
+  const p = new Float32Array(CORRECTION_LEN + 6);
+  p.set(correction.subarray(0, CORRECTION_LEN));
+  p.set([a.strength, a.temperature, a.tint, a.exposure, a.contrast, a.saturation], CORRECTION_LEN);
   return p;
 }
 

@@ -1,4 +1,4 @@
-import { type Adjustments, shaderValues } from '../model';
+import { type Adjustments, RANGE_NODES, shaderValues } from '../model';
 import { FRAGMENT, VERTEX } from './shader';
 
 type AnyCanvas = HTMLCanvasElement | OffscreenCanvas;
@@ -9,6 +9,8 @@ export class CorrectionRenderer {
   readonly gl: WebGL2RenderingContext;
   private uniforms: Record<string, WebGLUniformLocation | null> = {};
   private texture: WebGLTexture;
+  private rangeTexture: WebGLTexture;
+  private rangeSize: [number, number] = [1, 1];
 
   constructor(canvas: AnyCanvas) {
     const gl = canvas.getContext('webgl2', { alpha: false, antialias: false, preserveDrawingBuffer: true }) as WebGL2RenderingContext | null;
@@ -34,7 +36,10 @@ export class CorrectionRenderer {
     gl.enableVertexAttribArray(pos);
     gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0);
 
-    for (const name of ['u_tex', 'u_matrix', 'u_offset', 'u_strength', 'u_whiteBalance', 'u_exposure', 'u_contrast', 'u_saturation', 'u_split']) {
+    for (const name of [
+      'u_tex', 'u_encoded', 'u_comp', 'u_ranged', 'u_backscatter', 'u_logGain', 'u_range', 'u_rangeSize', 'u_rangeRect',
+      'u_matrix', 'u_offset', 'u_strength', 'u_whiteBalance', 'u_exposure', 'u_contrast', 'u_saturation', 'u_split',
+    ]) {
       this.uniforms[name] = gl.getUniformLocation(program, name);
     }
     this.texture = gl.createTexture()!;
@@ -44,6 +49,29 @@ export class CorrectionRenderer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.uniform1i(this.uniforms.u_tex, 0);
+
+    // The range map lives in texture unit 1; a one-cell map at middle range until a real one is set.
+    this.rangeTexture = gl.createTexture()!;
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.rangeTexture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.uniform1i(this.uniforms.u_range, 1);
+    gl.activeTexture(gl.TEXTURE0);
+    this.setRange(new Float32Array([1, 1, 0.5]));
+  }
+
+  /** Set the range map for corrections that need one: width, height, then one value per cell (as the core returns it). */
+  setRange(map: Float32Array) {
+    const gl = this.gl;
+    const width = map[0], height = map[1];
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.rangeTexture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, width, height, 0, gl.RED, gl.FLOAT, map.subarray(2, 2 + width * height));
+    gl.activeTexture(gl.TEXTURE0);
+    this.rangeSize = [width, height];
   }
 
   get maxTextureSize(): number {
@@ -63,16 +91,26 @@ export class CorrectionRenderer {
   }
 
   /**
-   * @param correction row-major 3x4: rows are [fromR, fromG, fromB, offset]
+   * @param correction the flat form described at `CORRECTION_LEN`
    * @param split show the original left of this x position (0..1); null turns the split off
+   * @param rect the part of the whole image the current source covers, as [x, y, width, height] in 0..1;
+   *   needed when drawing tiles, so that each finds its place in the range map
    */
-  draw(correction: Float32Array, adjustments: Adjustments, split: number | null = null) {
+  draw(correction: Float32Array, adjustments: Adjustments, split: number | null = null, rect: [number, number, number, number] = [0, 0, 1, 1]) {
     const gl = this.gl;
     const u = this.uniforms;
     const c = correction;
     // GLSL matrices are column-major.
     gl.uniformMatrix3fv(u.u_matrix, false, new Float32Array([c[0], c[4], c[8], c[1], c[5], c[9], c[2], c[6], c[10]]));
     gl.uniform3f(u.u_offset, c[3], c[7], c[11]);
+    gl.uniform1f(u.u_encoded, c[12]);
+    gl.uniform2f(u.u_comp, c[13], c[14]);
+    const tables = 3 * RANGE_NODES;
+    gl.uniform1fv(u.u_backscatter, c.subarray(15, 15 + tables));
+    gl.uniform1fv(u.u_logGain, c.subarray(15 + tables, 15 + 2 * tables));
+    gl.uniform1f(u.u_ranged, c[15 + 2 * tables]);
+    gl.uniform2f(u.u_rangeSize, ...this.rangeSize);
+    gl.uniform4f(u.u_rangeRect, ...rect);
     const values = shaderValues(adjustments);
     gl.uniform1f(u.u_strength, adjustments.strength);
     gl.uniform3f(u.u_whiteBalance, ...values.whiteBalance);

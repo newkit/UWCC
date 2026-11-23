@@ -1,4 +1,4 @@
-//! Derives the automatic correction from image statistics.
+//! UWCC's own method: derives the automatic correction from image statistics.
 //!
 //! Works in linear light on a small copy of the image. The method is UWCC's
 //! own, built from measurements on reference pairs (SPECIFICATION.md §6.5):
@@ -63,7 +63,12 @@ pub struct Analysis {
 }
 
 impl Analysis {
-    const NEUTRAL: Analysis = Analysis {
+    /// For methods that always apply in full and report no measurements.
+    pub(crate) fn plain(correction: Correction) -> Analysis {
+        Analysis { correction, strength: 1.0, ..Analysis::NEUTRAL }
+    }
+
+    pub(crate) const NEUTRAL: Analysis = Analysis {
         correction: Correction::IDENTITY,
         depletion: 0.0,
         strength: 0.0,
@@ -188,13 +193,11 @@ pub fn analyze_linear(px: &[[f32; 3]]) -> Analysis {
         gain = gain.map(|g| g * MAX_GAIN / max_gain);
     }
 
-    let full = Correction {
-        m: [
-            [red_row[0] * gain[0], red_row[1] * gain[0], red_row[2] * gain[0], -lo[0] * gain[0]],
-            [0.0, gain[1], 0.0, -lo[1] * gain[1]],
-            [0.0, 0.0, gain[2], -lo[2] * gain[2]],
-        ],
-    };
+    let full = Correction::affine([
+        [red_row[0] * gain[0], red_row[1] * gain[0], red_row[2] * gain[0], -lo[0] * gain[0]],
+        [0.0, gain[1], 0.0, -lo[1] * gain[1]],
+        [0.0, 0.0, gain[2], -lo[2] * gain[2]],
+    ]);
     Analysis { correction: full.scaled(strength), depletion, strength, scene_fraction, water_ratio }
 }
 
@@ -204,7 +207,7 @@ fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
 }
 
 /// Linear-interpolated percentile, `q` in 0..100.
-fn percentile(values: &[f32], q: f32) -> f32 {
+pub(crate) fn percentile(values: &[f32], q: f32) -> f32 {
     if values.is_empty() {
         return 0.0;
     }

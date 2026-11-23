@@ -18,7 +18,7 @@ for mobile with Capacitor. Progress per milestone is listed at the end of
 
 ## Layout
 
-- `core/` - Rust crate `uwcc-core`: analysis, parameter model, CPU reference implementation, WASM bindings.
+- `core/` - Rust crate `uwcc-core`: parameter model, CPU reference implementation, WASM bindings, and one module per correction method: `analysis` (UWCC's own, the default), `matrix`, `ancuti`, `seathru` (with `range`, the estimated range map it needs). `examples/sheet.rs` renders all methods side by side.
 - `web/` - the app: React + TypeScript + Vite. `src/render/` shader and renderer, `src/worker/` WASM core and JPEG encoder off the main thread, `src/io/` sources, import, export and output targets, `src/batch/` the job queue, `src/video/` clip analysis and WebCodecs export (loaded on demand; keep `mediabunny` imports inside `video.ts`), `src/settings/` persisted settings, `src/ui/` components.
 - `spike/m0/` - throwaway device test page for M0. Do not build the app on it.
 - `testdata/photos/` - reference pairs used by the core's tests and as in-app samples. `testdata/local/` is git-ignored.
@@ -55,13 +55,16 @@ pushes to `main`.
 Checking the shader against the reference: in the running app,
 `await window.uwccSelfTest()` in the browser console returns the largest
 per-channel difference (0-255) between GPU and CPU on a generated image.
-Expect 0 or 1.
+Expect 0 or 1; `cases` in the result gives the difference per branch of the pipeline.
 
 ## Architecture rules
 
 - `core/` (Rust) has no browser dependencies and must build and test natively.
 - Per-pixel work belongs in the shader, not in WASM or JavaScript.
 - The shader (`web/src/render/shader.ts`), the uniform maths in `web/src/model.ts` and the Rust reference (`core/src/reference.rs`) implement the same per-pixel steps; change them together and run the self-test.
+- Every correction method only produces parameters (`Correction` in `core/src/model.rs`) for that one pipeline. A new method is a new analysis module plus an entry in `Algorithm` (core) and `ALGORITHMS` (`web/src/model.ts`); it must not get its own shader, export or preview path. If it needs a new per-pixel step, add the step to the shared pipeline, neutral by default.
+- Parameters must stay meaningful when two corrections are blended value by value, because video interpolates between analysed frames. Store curves as tables, not as fitted function parameters (`SPECIFICATION.md` §6.7).
+- Published methods are implemented from their papers, with every deviation listed at the top of the module. Do not describe a partial implementation as the full method, in code or in the interface.
 - Edits are non-destructive: parameters applied to the original, baked only at export.
 - Video is streamed frame by frame and written to a temporary file (`web/src/io/tempFiles.ts`); never hold a whole clip in memory.
 - Heavy work runs off the main thread.

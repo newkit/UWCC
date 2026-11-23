@@ -6,7 +6,7 @@ import { loadAnalysisCopy } from '../io/importPhoto';
 import { isTaggedJpeg } from '../io/jpegMarker';
 import { deliver, isProcessedName, type WriteResult } from '../io/output';
 import type { Source } from '../io/sources';
-import { type Adjustments, type Analysis, DEFAULT_ADJUSTMENTS, packParams } from '../model';
+import { type Adjustments, type Algorithm, type Analyses, type Analysis, DEFAULT_ADJUSTMENTS, DEFAULT_ALGORITHM, packParams } from '../model';
 import type { Settings } from '../settings/settings';
 import type { VideoMeta } from '../video/video';
 import { analyze, applyReference } from '../worker/client';
@@ -26,9 +26,11 @@ export type Job = {
   status: JobStatus;
   /** Why the job is skipped, unsupported or failed. */
   message?: string;
-  analysis?: Analysis;
+  /** The automatic analysis by every method; `algorithm` picks the one in use. */
+  analysis?: Analyses;
+  algorithm: Algorithm;
   adjustments: Adjustments;
-  /** Videos only: the correction over time, and clip facts. */
+  /** Videos only: the correction over time (per method), and clip facts. */
   video?: VideoMeta;
   /** Corrected thumbnail (data URL). */
   thumb?: string;
@@ -42,13 +44,16 @@ export type Job = {
 let nextId = 1;
 
 export function createJob(source: Source, settings: Settings): Job {
-  const job: Job = { id: nextId++, source, status: 'analyzing', adjustments: DEFAULT_ADJUSTMENTS };
+  const job: Job = { id: nextId++, source, status: 'analyzing', algorithm: DEFAULT_ALGORITHM, adjustments: DEFAULT_ADJUSTMENTS };
   if (source.kind === 'other') return { ...job, status: 'unsupported', message: 'Not a photo or video.' };
   if (settings.skipProcessed && isProcessedName(source.name, settings.suffix)) {
     return { ...job, status: 'skipped', message: 'Already corrected by UWCC.' };
   }
   return job;
 }
+
+/** The analysis of the method the job is set to. */
+export const currentAnalysis = (job: Job): Analysis | undefined => job.analysis?.[job.algorithm];
 
 // The video code is loaded on first use.
 const videoModule = () => import('../video/video');
@@ -63,8 +68,8 @@ export async function alreadyCorrected(source: Source): Promise<boolean> {
 export async function prepare(source: Source): Promise<Pick<Job, 'analysis' | 'video' | 'thumb' | 'width' | 'height'>> {
   if (source.kind === 'video') return (await videoModule()).prepareVideo(source.file, source.name);
   const copy = await loadAnalysisCopy(source.file, source.name);
-  const analysis = await analyze(copy.pixels);
-  const corrected = await applyReference(copy.pixels.slice(), packParams(analysis.correction, DEFAULT_ADJUSTMENTS));
+  const analysis = await analyze(copy.pixels, copy.width, copy.height);
+  const corrected = await applyReference(copy.pixels.slice(), copy.width, packParams(analysis[DEFAULT_ALGORITHM].correction, DEFAULT_ADJUSTMENTS));
   const canvas = document.createElement('canvas');
   canvas.width = copy.width;
   canvas.height = copy.height;
@@ -80,11 +85,12 @@ export async function process(
   onProgress: (fraction: number) => void,
   signal: AbortSignal,
 ): Promise<WriteResult> {
-  if (!job.analysis) throw new Error('This file has not been analysed.');
+  const analysis = currentAnalysis(job);
+  if (!analysis) throw new Error('This file has not been analysed.');
   const target = { mode: settings.outputMode, suffix: settings.suffix, fallbackDir };
   if (job.video) {
     const { exportVideo } = await videoModule();
-    const result = await exportVideo(job.source.file, job.video.keys, job.adjustments, onProgress, signal);
+    const result = await exportVideo(job.source.file, job.video.keys[job.algorithm], job.adjustments, onProgress, signal);
     let delivered: WriteResult | null = null;
     try {
       delivered = await deliver(job.source, result.blob, { ...target, format: 'mp4' });
@@ -97,7 +103,7 @@ export async function process(
   }
   const blob = await exportPhoto(
     job.source.file,
-    job.analysis.correction,
+    analysis.correction,
     job.adjustments,
     settings.jpegQuality,
     // Rendering is most of the visible work; encoding has no progress of its own.

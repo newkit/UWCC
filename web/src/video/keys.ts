@@ -1,7 +1,7 @@
 // The correction over the length of a clip. Kept apart from `video.ts` so
 // the editor can use it without loading the container library.
 
-/** The correction over the length of a clip: one matrix per analysed frame, interpolated in between. */
+/** The correction over the length of a clip: one per analysed frame, interpolated in between. */
 export type VideoKeys = { times: number[]; corrections: Float32Array[] };
 
 
@@ -15,7 +15,7 @@ export function correctionAt(keys: VideoKeys, t: number): Float32Array {
   while (i < last && times[i + 1] < t) i++;
   const f = (t - times[i]) / (times[i + 1] - times[i]);
   const a = corrections[i], b = corrections[i + 1];
-  const out = new Float32Array(12);
-  for (let k = 0; k < 12; k++) out[k] = a[k] + (b[k] - a[k]) * f;
+  const out = new Float32Array(a.length);
+  for (let k = 0; k < a.length; k++) out[k] = a[k] + (b[k] - a[k]) * f;
   return out;
 }

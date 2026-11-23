@@ -63,6 +63,7 @@ photo or video editor.
 | F17 | Settings, stored on the device: output location (next to source / overwrite source), file-name suffix, JPEG quality, video quality. |
 | F18 | Files already produced by UWCC are recognised (metadata tag, and the suffix) and skipped by default, so nothing is corrected twice. |
 | F13 | Zoom and pan in the photo editor. |
+| F19 | The correction method is selectable per item in the editor (§6.7): UWCC's own (default), and re-implementations of published methods for comparison. The choice is applied in preview and export, for photos and videos, and can be applied to all items of a batch. |
 
 ## 4. Non-functional requirements
 
@@ -234,7 +235,9 @@ Dependencies must be checked for licence compatibility before they are added.
 5. a global `strength` blending original and corrected.
 
 This covers the matrix method and the Ancuti-style compensation with the same
-shader, so the two can be compared by changing only the analysis.
+shader, so the two can be compared by changing only the analysis. As built,
+the representation also carries a flag for working on encoded instead of
+linear values and two range-dependent tables per channel; see §6.7.
 
 **Analysis (WASM, on a ~256-512 px copy).** Work in linear light. Measure
 channel means and histograms; estimate how depleted red is; derive the
@@ -365,6 +368,73 @@ on; that override is not built yet.
    compensation) in the Rust core and render contact sheets side by side.
 3. Pick the default by eye together with the owner; tune the safeguards.
 4. Freeze the chosen examples as regression images in `testdata/`.
+
+### 6.7 Selectable methods
+
+The editor offers the correction method as a drop-down (F19). All methods
+produce parameters for the same per-pixel pipeline (`Correction` in
+`core/src/model.rs`), so preview, tiled photo export, video export, batch and
+the CPU reference work for every one of them without a second code path.
+Every file is analysed by all methods at import, so switching is immediate.
+
+The pipeline, per pixel: take the value encoded or in linear light; add red
+and blue in proportion to green (compensation); optionally subtract
+backscatter and multiply by an attenuation gain, both looked up by the
+pixel's range; apply a 3x4 matrix; then the manual adjustments as before.
+
+| Method | Source | What is implemented | What is not |
+|--------|--------|---------------------|-------------|
+| UWCC (default) | This project, §6.5 | Everything | |
+| Hue-shift matrix | The idea of the GPL tools in §6.3. There is no paper | Red borrowed from green and blue by rotating the hue (the standard hue-rotation matrix of the W3C Filter Effects specification) until mean red reaches 60/255, at most 120 degrees; then each channel stretched between its 0.5th and 99.5th percentile. On encoded values | Written from the description in §6.3, not from the GPL sources; constants and the choice of levels are UWCC's, so results differ from those tools |
+| Ancuti white balance | Ancuti, Ancuti, De Vleeschouwer, Bekaert: "Color Balance and Fusion for Underwater Image Enhancement", IEEE TIP 2018 | The white-balance stage: red compensation `r + (mean_g - mean_r)(1 - r) g`, blue compensation in green water, grey-world gains. On encoded values | The multi-scale fusion (gamma-corrected and sharpened inputs blended over Laplacian pyramids): spatial, not per-pixel |
+| Sea-thru (estimated range) | Akkaynak, Treibitz: "Sea-thru: A Method for Removing Water from Underwater Images", CVPR 2019 | The paper's image formation model and estimation steps: backscatter fitted to the darkest 1 % of pixels in ten range bins; illuminant by local space average colour among neighbours of similar range; attenuation coefficient as a two-term exponential of range; recovery and grey-world balance. In linear light | **The range map.** The paper measures range with stereo or structure from motion. UWCC has one image and estimates relative range from colour (below). Also: 8-bit JPEG or video instead of linear RAW; a simpler attenuation fit; caps on the gains. Listed at the top of `core/src/seathru.rs` |
+
+**Estimated range** (`core/src/range.rs`). After the underwater light
+attenuation prior of Song et al. 2018: range grows with max(green, blue) and
+falls with red, as a fixed linear function. Two changes: the colour is first
+divided by its brightest channel, because on raw values the estimate follows
+brightness and Sea-thru's backscatter step then removes the image itself
+(seen on the reference photos); and instead of a guided filter the map is
+computed on a grid of at most 24 cells and blurred, so that it can be redone
+for every video frame. The linear coefficients (0.532, 0.513, -0.911) are
+written from memory of the paper and were not re-checked against it. The
+consequences are plain: where red is completely absent the map is flat and
+Sea-thru reduces to a global correction; a subject that is red by nature
+reads as near.
+
+**Range in the pipeline.** The map is a small float texture. The shader
+interpolates it by hand so that GPU and CPU agree, and export tiles pass
+their position in the whole image. For video the map is recomputed for every
+frame (preview and export); the fitted curves come from the analysed frames
+and are interpolated in between. They are stored as tables of 8 samples over
+range, not as function parameters: blending the parameters of two fits gives
+a curve unrelated to either, which showed as violent colour swings in the
+first video export.
+
+**Results** on the reference photos, the flash photo and three frames of the
+owner's clip, judged by eye on a contact sheet
+(`cargo run --release --example sheet -- out.jpg images...` in `core/`):
+
+- On the clip, where red is weak but present, all four methods give a usable
+  result: UWCC and Ancuti similar, the matrix slightly pink, Sea-thru more
+  neutral and with more contrast.
+- On the three deep photos, where red is absent, only UWCC comes close to
+  the targets. The matrix turns open water pink (it borrows red from blue).
+  Ancuti is flat and yellowish, the known look of plain grey-world. Sea-thru
+  stays blue-green: it restores what was attenuated and cannot rebuild a
+  channel that holds no signal, and its gain cap stops it from amplifying
+  noise instead.
+- On the flash photo, which needs no correction, UWCC alone leaves the image
+  unchanged. The others always apply.
+
+Only UWCC's own method has numeric regression thresholds. The others are
+covered by unit tests on synthetic input (including a scene rendered through
+Sea-thru's own model, which it must turn grey again) and by a check that
+each gives finite parameters and a usable image on the reference photos.
+
+Not done: a default-method setting for new items, thumbnails that follow the
+chosen method, a real depth source (a depth-estimation model, or depth from
+dual-camera phones), and the fusion stage of Ancuti et al.
 
 ## 7. Batch processing and output location
 
@@ -564,6 +634,12 @@ Status on 2026-11-23:
   - Missing: HDR / 10-bit handling (not detected yet), a video quality
     setting, and the smoothing can soften the correction for about 2 seconds
     around an abrupt change such as a light switching on.
+- Selectable methods (F19, §6.7): drop-down in the editor with UWCC, hue-shift
+  matrix, Ancuti white balance and Sea-thru on an estimated range map; all
+  work in preview, photo and video export and batch. The shader matches the
+  CPU reference to within 1 of 255 on every branch of the pipeline, in a
+  software-rendered browser. Verified headless on photos (including a
+  multi-tile export) and on the owner's clip. Not verified on real GPUs.
 - M6 onwards: not started.
 
 ## 10. Risks

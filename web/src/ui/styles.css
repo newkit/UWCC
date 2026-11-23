@@ -192,3 +192,8 @@ button.danger { background: #c4453a; border-color: #c4453a; color: #fff; font-we
 .transport input { flex: 1; margin: 0; }
 .transport span { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .view:has(.transport) .busy { bottom: 70px; }
+
+.method { margin-top: 12px; font-size: 13px; color: var(--muted); }
+.method select {
+  font: inherit; font-size: 14px; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px;
+}

@@ -1,4 +1,5 @@
-import type { Adjustments } from '../model';
+import { type Adjustments, usesRange } from '../model';
+import { rangeMapOf } from '../render/range';
 import { CorrectionRenderer, createWorkCanvas } from '../render/renderer';
 import { encodeJpeg } from '../worker/client';
 import { tagJpeg } from './jpegMarker';
@@ -31,6 +32,7 @@ export async function exportPhoto(
     } catch {
       throw new Error('Not enough memory to export this photo at full resolution on this device.');
     }
+    if (usesRange(correction)) renderer.setRange(await rangeMapOf(bitmap, W, H));
     const tile = new Uint8Array(TILE * TILE * 4);
     for (let y = 0; y < H; y += TILE) {
       checkCancelled();
@@ -39,7 +41,7 @@ export async function exportPhoto(
         const part = await createImageBitmap(bitmap, x, y, w, h);
         renderer.setSource(part, w, h);
         part.close();
-        renderer.draw(correction, adjustments);
+        renderer.draw(correction, adjustments, null, [x / W, y / H, w / W, h / H]);
         const view = tile.subarray(0, w * h * 4);
         renderer.readPixels(w, h, view);
         for (let row = 0; row < h; row++) { // readPixels rows are bottom-up

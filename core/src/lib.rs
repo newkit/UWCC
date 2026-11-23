@@ -1,18 +1,35 @@
 //! UWCC core: analysis of underwater images and the reference implementation
 //! of the colour correction.
 //!
-//! The correction is a per-pixel colour mapping with no spatial filtering.
-//! `analysis` derives its parameters from a small copy of the image;
-//! `reference` applies them on the CPU and is the ground truth for the GPU
-//! shader in the web app, which must implement exactly the same maths.
+//! A correction is a set of parameters for one per-pixel pipeline
+//! (`model::Correction`). Several methods can derive those parameters from a
+//! small copy of the image: UWCC's own (`analysis`), and re-implementations
+//! of published ones (`matrix`, `ancuti`, `seathru`). `reference` applies the
+//! parameters on the CPU and is the ground truth for the GPU shader in the
+//! web app, which must implement exactly the same maths.
 //!
 //! This crate has no browser dependencies apart from the thin `wasm` module.
 
 pub mod analysis;
+pub mod ancuti;
 pub mod color;
+pub mod matrix;
 pub mod model;
+pub mod range;
 pub mod reference;
+pub mod seathru;
 mod wasm;
 
 pub use analysis::{analyze_linear, analyze_srgb8, Analysis};
-pub use model::{Adjustments, Correction};
+pub use model::{Adjustments, Algorithm, Correction, CORRECTION_LEN};
+pub use range::RangeMap;
+
+/// Analyse an RGBA8 sRGB image of `width` x `height` pixels with the chosen method.
+pub fn analyze(algorithm: Algorithm, rgba: &[u8], width: usize, height: usize) -> Analysis {
+    match algorithm {
+        Algorithm::Uwcc => analysis::analyze_srgb8(rgba),
+        Algorithm::Matrix => matrix::analyze(rgba),
+        Algorithm::Ancuti => ancuti::analyze(rgba),
+        Algorithm::SeaThru => seathru::analyze(rgba, width, height),
+    }
+}

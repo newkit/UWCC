@@ -1,4 +1,4 @@
-import { type Analysis, analysisFromArray } from '../model';
+import { ALGORITHMS, type Analyses, analysisFromArray } from '../model';
 import type { Request, Response } from './core.worker';
 
 let worker: Worker | null = null;
@@ -35,14 +35,22 @@ function call<T>(request: Payload<Request>, transfer: Transferable[] = []): Prom
   });
 }
 
-/** Automatic analysis of a small RGBA copy of the image. */
-export async function analyze(rgba: Uint8Array): Promise<Analysis> {
-  return analysisFromArray(await call<Float32Array>({ type: 'analyze', rgba }));
+/** Automatic analysis of a small RGBA copy of the image, by every method. */
+export async function analyze(rgba: Uint8Array, width: number, height: number): Promise<Analyses> {
+  const results = await call<Float32Array[]>({ type: 'analyze', rgba, width, height, algorithms: ALGORITHMS.map((a) => a.core) });
+  return Object.fromEntries(ALGORITHMS.map((a, i) => [a.id, analysisFromArray(results[i])])) as Analyses;
 }
 
-/** CPU reference implementation; used to check the shader. */
-export function applyReference(rgba: Uint8Array, params: Float32Array): Promise<Uint8Array> {
-  return call<Uint8Array>({ type: 'reference', rgba, params });
+/** Range map of a small RGBA copy: width, height, then one value per cell. */
+export function rangeMap(rgba: Uint8Array, width: number, height: number): Promise<Float32Array> {
+  return call<Float32Array>({ type: 'rangeMap', rgba, width, height });
+}
+
+const NO_RANGE = new Float32Array(0);
+
+/** CPU reference implementation; used for thumbnails and to check the shader. */
+export function applyReference(rgba: Uint8Array, width: number, params: Float32Array, range: Float32Array = NO_RANGE): Promise<Uint8Array> {
+  return call<Uint8Array>({ type: 'reference', rgba, width, params, range });
 }
 
 /** Encode RGBA pixels as JPEG. The pixel buffer is transferred and no longer usable afterwards. */

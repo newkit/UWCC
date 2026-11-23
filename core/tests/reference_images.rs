@@ -36,7 +36,7 @@ fn corrected(name: &str) -> (Vec<u8>, Vec<u8>, uwcc_core::Analysis) {
     let (before, _, _) = load(name);
     let analysis = analyze_srgb8(&before);
     let mut out = before.clone();
-    apply_rgba8(&mut out, &analysis.correction, &Adjustments::default());
+    apply_rgba8(&mut out, WIDTH as usize, &analysis.correction, &Adjustments::default(), None);
     (before, out, analysis)
 }
 
@@ -98,4 +98,28 @@ fn flash_photo_is_left_alone() {
     let e = rmse(&before, &out);
     println!("flash: change {e:?} depletion {:.2} strength {:.2}", analysis.depletion, analysis.strength);
     assert!(e.iter().all(|&v| v < 0.02), "flash photo changed too much: {e:?}");
+}
+
+/// Every selectable method must produce usable parameters and a visible image on real photos.
+#[test]
+fn every_method_gives_a_sane_result() {
+    use uwcc_core::{analyze, Algorithm, RangeMap};
+    for name in ["turtle_before.jpg", "dolphins_before.jpg", "coral_before.jpg", "coral_flash.jpg"] {
+        let (before, w, h) = load(name);
+        let map = RangeMap::from_srgb8(&before, w as usize, h as usize);
+        assert!(map.data.iter().all(|v| (0.0..=1.0).contains(v)), "{name}: range map out of bounds");
+        for algorithm in Algorithm::ALL {
+            let analysis = analyze(algorithm, &before, w as usize, h as usize);
+            assert!(
+                analysis.correction.to_array().iter().all(|v| v.is_finite()),
+                "{name} {algorithm:?}: parameters not finite"
+            );
+            let mut out = before.clone();
+            apply_rgba8(&mut out, w as usize, &analysis.correction, &Adjustments::default(), Some(&map));
+            let mean = out.as_chunks::<4>().0.iter().map(|p| p[0] as f64 + p[1] as f64 + p[2] as f64).sum::<f64>()
+                / (3.0 * (out.len() / 4) as f64);
+            println!("{name} {algorithm:?}: mean level {mean:.0}");
+            assert!((25.0..=230.0).contains(&mean), "{name} {algorithm:?}: mean level {mean:.0} is not a usable image");
+        }
+    }
 }

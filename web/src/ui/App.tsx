@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { alreadyCorrected, createJob, isCancel, type Job, prepare, process } from '../batch/queue';
 import { fromDirectory, fromDrop, fromFiles, fsAccess, pickFiles, pickFolder, pickOutputFolder, type Source } from '../io/sources';
-import type { Adjustments } from '../model';
+import type { Adjustments, Algorithm } from '../model';
 import { type Settings, useSettings } from '../settings/settings';
 import { removeStaleTempFiles } from '../io/tempFiles';
 import { EditorView } from './EditorView';
@@ -225,9 +225,9 @@ export function App() {
     setJobs((list) => list.filter((j) => !ids.includes(j.id)));
   };
   const clearAll = () => { remove(jobs.map((j) => j.id)); setEditing(null); setRun(null); setNotice(null); setError(null); };
-  const applyToAll = (adjustments: Adjustments) => {
-    setJobs((list) => list.map((job) => ({ ...job, adjustments })));
-    setNotice(`Adjustments applied to all ${jobs.length} files.`);
+  const applyToAll = (algorithm: Algorithm, adjustments: Adjustments) => {
+    setJobs((list) => list.map((job) => ({ ...job, algorithm, adjustments })));
+    setNotice(`Method and adjustments applied to all ${jobs.length} files.`);
   };
 
   return (
@@ -286,7 +286,8 @@ export function App() {
           multiple={jobs.length > 1}
           busy={busy}
           onChange={(adjustments) => patch(editingJob.id, { adjustments })}
-          onApplyToAll={() => applyToAll(editingJob.adjustments)}
+          onAlgorithm={(algorithm) => patch(editingJob.id, { algorithm })}
+          onApplyToAll={() => applyToAll(editingJob.algorithm, editingJob.adjustments)}
           onError={setError}
         />
       ) : (

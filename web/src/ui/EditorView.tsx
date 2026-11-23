@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import type { Job } from '../batch/queue';
+import { currentAnalysis, type Job } from '../batch/queue';
 import { type LoadedPhoto, loadPhoto } from '../io/importPhoto';
-import { type Adjustments, type Analysis, IDENTITY_CORRECTION } from '../model';
+import { ALGORITHMS, type Adjustments, type Algorithm, type Analysis, IDENTITY_CORRECTION } from '../model';
 import { correctionAt } from '../video/keys';
 import { Controls } from './Controls';
 import { useVideo } from './useVideo';
@@ -13,11 +13,20 @@ type Props = {
   multiple: boolean;
   busy: string | null;
   onChange: (adjustments: Adjustments) => void;
+  onAlgorithm: (algorithm: Algorithm) => void;
   onApplyToAll: () => void;
   onError: (message: string) => void;
 };
 
-function describe(analysis: Analysis, video: boolean): string {
+/** What the other methods do, in a sentence; UWCC's own is described from its measurements. */
+const METHOD_NOTES: Record<Exclude<Algorithm, 'uwcc'>, string> = {
+  matrix: 'Borrows red from green and blue by shifting the hue, then stretches each channel to full range. Always applies in full; very blue footage can turn pink.',
+  ancuti: 'White balance after Ancuti et al. (2018): adds red where there is green, then balances the channels to grey. Always applies in full.',
+  seathru: 'The Sea-thru model (Akkaynak and Treibitz, 2019): removes haze and restores colour by distance. The distance is estimated from the image, because no depth map is available. Experimental; it needs some red left in the footage.',
+};
+
+function describe(algorithm: Algorithm, analysis: Analysis, video: boolean): string {
+  if (algorithm !== 'uwcc') return METHOD_NOTES[algorithm];
   const what = video ? 'at the start of this clip' : 'in this photo';
   if (analysis.strength < 0.05) return `Colours already look natural ${what}, so no automatic correction was applied.`;
   const partial = analysis.strength < 0.95 ? ` Applied at ${Math.round(analysis.strength * 100)}%, because some natural colour is present.` : '';
@@ -27,7 +36,7 @@ function describe(analysis: Analysis, video: boolean): string {
 
 const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
 
-export function EditorView({ job, multiple, busy, onChange, onApplyToAll, onError }: Props) {
+export function EditorView({ job, multiple, busy, onChange, onAlgorithm, onApplyToAll, onError }: Props) {
   const isVideo = job.source.kind === 'video';
   const [photo, setPhoto] = useState<LoadedPhoto | null>(null);
   const [compare, setCompare] = useState(false);
@@ -61,9 +70,10 @@ export function EditorView({ job, multiple, busy, onChange, onApplyToAll, onErro
   const shown = isVideo ? video.ready && video.element : photo;
   const waiting = !shown || job.status === 'analyzing';
   const status = busy ?? (waiting ? (isVideo ? 'Opening video…' : 'Opening photo…') : null);
-  const correction = !job.analysis
+  const analysis = currentAnalysis(job);
+  const correction = !analysis
     ? IDENTITY_CORRECTION
-    : job.video ? correctionAt(job.video.keys, video.time) : job.analysis.correction;
+    : job.video ? correctionAt(job.video.keys[job.algorithm], video.time) : analysis.correction;
   const size = isVideo ? { width: video.width, height: video.height } : photo ? { width: photo.width, height: photo.height } : null;
 
   return (
@@ -100,14 +110,20 @@ export function EditorView({ job, multiple, busy, onChange, onApplyToAll, onErro
           </button>
           <button type="button" className="ghost" {...hold}>Hold for original</button>
         </div>
-        {job.analysis && <p className="info">{describe(job.analysis, isVideo)}</p>}
-        {job.video && job.video.keys.times.length > 1 && (
-          <p className="info">The correction follows the clip: it was measured at {job.video.keys.times.length} points and changes smoothly between them.</p>
+        <label className="field method">
+          <span>Method</span>
+          <select value={job.algorithm} disabled={!!busy || waiting} onChange={(e) => onAlgorithm(e.target.value as Algorithm)}>
+            {ALGORITHMS.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
+          </select>
+        </label>
+        {analysis && <p className="info">{describe(job.algorithm, analysis, isVideo)}</p>}
+        {job.video && job.video.keys[job.algorithm].times.length > 1 && (
+          <p className="info">The correction follows the clip: it was measured at {job.video.keys[job.algorithm].times.length} points and changes smoothly between them.</p>
         )}
         <Controls adjustments={job.adjustments} onChange={onChange} disabled={!!busy || waiting} />
         {multiple && (
           <button type="button" className="ghost wide" onClick={onApplyToAll} disabled={!!busy || waiting}>
-            Apply these adjustments to all files
+            Apply method and adjustments to all files
           </button>
         )}
         <p className="meta">
