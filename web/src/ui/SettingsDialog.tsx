@@ -35,14 +35,14 @@ export function SettingsDialog({ open, settings, onChange, onClose }: Props) {
               <strong>Replace the original</strong>
               <small>
                 {canWrite
-                  ? 'The corrected photo takes the place of the source file. The original is lost and cannot be restored by UWCC.'
+                  ? 'The corrected file takes the place of the source file. The original is lost and cannot be restored by UWCC. Videos are re-encoded.'
                   : 'Not available: this browser does not let web pages write to your files.'}
               </small>
             </span>
           </label>
           {!canWrite && <p className="note">In this browser, results are saved to the download folder.</p>}
           {settings.outputMode === 'overwrite' && canWrite && (
-            <p className="note warning">Originals that are not JPEG files are kept, and their result is saved as a new file.</p>
+            <p className="note warning">Only JPEG photos and MP4 videos can be replaced. Other originals are kept, and their result is saved as a new file.</p>
           )}
         </fieldset>
 
@@ -60,7 +60,7 @@ export function SettingsDialog({ open, settings, onChange, onClose }: Props) {
         </label>
 
         <label className="field">
-          <span>JPEG quality: {settings.jpegQuality}</span>
+          <span>JPEG quality for photos: {settings.jpegQuality}</span>
           <input type="range" min={60} max={100} step={1} value={settings.jpegQuality} onChange={(e) => onChange({ ...settings, jpegQuality: Number(e.target.value) })} />
         </label>
 
@@ -68,7 +68,7 @@ export function SettingsDialog({ open, settings, onChange, onClose }: Props) {
           <input type="checkbox" checked={settings.skipProcessed} onChange={(e) => onChange({ ...settings, skipProcessed: e.target.checked })} />
           <span>
             <strong>Skip files already corrected</strong>
-            <small>Photos UWCC has saved before are left out, so nothing is corrected twice. Applies to files added from now on.</small>
+            <small>Photos and videos UWCC has saved before are left out, so nothing is corrected twice. Applies to files added from now on.</small>
           </span>
         </label>
 

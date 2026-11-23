@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@jsquash/jpeg": "^1.6.0",
+    "mediabunny": "^1.66.2",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },

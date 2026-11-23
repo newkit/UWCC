@@ -19,7 +19,7 @@ for mobile with Capacitor. Progress per milestone is listed at the end of
 ## Layout
 
 - `core/` - Rust crate `uwcc-core`: analysis, parameter model, CPU reference implementation, WASM bindings.
-- `web/` - the app: React + TypeScript + Vite. `src/render/` shader and renderer, `src/worker/` WASM core and JPEG encoder off the main thread, `src/io/` sources, import, export and output targets, `src/batch/` the job queue, `src/settings/` persisted settings, `src/ui/` components.
+- `web/` - the app: React + TypeScript + Vite. `src/render/` shader and renderer, `src/worker/` WASM core and JPEG encoder off the main thread, `src/io/` sources, import, export and output targets, `src/batch/` the job queue, `src/video/` clip analysis and WebCodecs export (loaded on demand; keep `mediabunny` imports inside `video.ts`), `src/settings/` persisted settings, `src/ui/` components.
 - `spike/m0/` - throwaway device test page for M0. Do not build the app on it.
 - `testdata/photos/` - reference pairs used by the core's tests and as in-app samples. `testdata/local/` is git-ignored.
 
@@ -63,7 +63,7 @@ Expect 0 or 1.
 - Per-pixel work belongs in the shader, not in WASM or JavaScript.
 - The shader (`web/src/render/shader.ts`), the uniform maths in `web/src/model.ts` and the Rust reference (`core/src/reference.rs`) implement the same per-pixel steps; change them together and run the self-test.
 - Edits are non-destructive: parameters applied to the original, baked only at export.
-- Video is streamed frame by frame; never hold a whole clip in memory.
+- Video is streamed frame by frame and written to a temporary file (`web/src/io/tempFiles.ts`); never hold a whole clip in memory.
 - Heavy work runs off the main thread.
 - Platform-specific code lives only in `web/src/io/` (behind interfaces) and the native media plugin under `mobile/plugins/media/`. The plugin does media access only, never processing.
 - The single-item editor and batch runs share one path: every file is a job in `web/src/batch/queue.ts`, analysed through `loadAnalysisCopy` and exported through `process`. Do not add a second analysis or export path.

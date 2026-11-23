@@ -181,3 +181,14 @@ button.danger { background: #c4453a; border-color: #c4453a; color: #fff; font-we
   .chip { display: none; }
   .job.done .chip, .job.failed .chip, .job.running .chip { display: inline; }
 }
+
+/* Video transport */
+.view:has(.transport) .stage { bottom: 60px; }
+.transport {
+  position: absolute; left: 12px; right: 12px; bottom: 10px; display: flex; align-items: center; gap: 10px;
+  background: rgba(15, 19, 24, 0.85); border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px;
+}
+.transport button { padding: 6px 12px; min-width: 64px; }
+.transport input { flex: 1; margin: 0; }
+.transport span { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.view:has(.transport) .busy { bottom: 70px; }

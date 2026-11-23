@@ -1,10 +1,15 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { LoadedPhoto } from '../io/importPhoto';
 import type { Adjustments } from '../model';
 import { CorrectionRenderer } from '../render/renderer';
 
 type Props = {
-  photo: LoadedPhoto;
+  /** The image to show: a photo preview, or a video element. */
+  source: TexImageSource;
+  width: number;
+  height: number;
+  /** Changes whenever the source has new content (a new video frame). */
+  frame?: number;
+  label: string;
   correction: Float32Array;
   adjustments: Adjustments;
   /** Split view: original on the left of a draggable divider. */
@@ -14,10 +19,11 @@ type Props = {
   onError: (message: string) => void;
 };
 
-export function Viewer({ photo, correction, adjustments, compare, showOriginal, onError }: Props) {
+export function Viewer({ source, width, height, frame = 0, label, correction, adjustments, compare, showOriginal, onError }: Props) {
   const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<CorrectionRenderer | null>(null);
+  const uploaded = useRef<{ source: TexImageSource; frame: number } | null>(null);
   const [box, setBox] = useState({ width: 0, height: 0 });
   const [split, setSplit] = useState(0.5);
 
@@ -25,14 +31,14 @@ export function Viewer({ photo, correction, adjustments, compare, showOriginal, 
   useLayoutEffect(() => {
     const stage = stageRef.current!;
     const fit = () => {
-      const scale = Math.min(stage.clientWidth / photo.preview.width, stage.clientHeight / photo.preview.height);
-      setBox({ width: Math.floor(photo.preview.width * scale), height: Math.floor(photo.preview.height * scale) });
+      const scale = Math.min(stage.clientWidth / width, stage.clientHeight / height);
+      setBox({ width: Math.floor(width * scale), height: Math.floor(height * scale) });
     };
     fit();
     const observer = new ResizeObserver(fit);
     observer.observe(stage);
     return () => observer.disconnect();
-  }, [photo]);
+  }, [width, height]);
 
   useEffect(() => {
     try {
@@ -40,19 +46,19 @@ export function Viewer({ photo, correction, adjustments, compare, showOriginal, 
     } catch (error) {
       onError(error instanceof Error ? error.message : String(error));
     }
-    return () => { rendererRef.current = null; };
+    return () => { rendererRef.current = null; uploaded.current = null; };
   }, [onError]);
 
   useEffect(() => {
-    rendererRef.current?.setSource(photo.preview, photo.preview.width, photo.preview.height);
-  }, [photo]);
-
-  useEffect(() => {
     const renderer = rendererRef.current;
-    if (!renderer) return;
+    if (!renderer || width === 0 || height === 0) return;
+    if (uploaded.current?.source !== source || uploaded.current.frame !== frame) {
+      renderer.setSource(source, width, height);
+      uploaded.current = { source, frame };
+    }
     // Left of the split shows the original; a split of 2 puts the whole frame left of it.
     renderer.draw(correction, adjustments, showOriginal ? 2 : compare ? split : null);
-  }, [photo, correction, adjustments, compare, showOriginal, split]);
+  }, [source, width, height, frame, correction, adjustments, compare, showOriginal, split]);
 
   const drag = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!(event.buttons & 1) && event.pointerType === 'mouse') return;
@@ -68,7 +74,7 @@ export function Viewer({ photo, correction, adjustments, compare, showOriginal, 
         onPointerDown={compare ? (e) => { e.currentTarget.setPointerCapture(e.pointerId); drag(e); } : undefined}
         onPointerMove={compare ? drag : undefined}
       >
-        <canvas ref={canvasRef} aria-label={`Preview of ${photo.name}`} />
+        <canvas ref={canvasRef} aria-label={`Preview of ${label}`} />
         {compare && !showOriginal && (
           <>
             <div className="divider" style={{ left: `${split * 100}%` }} aria-hidden="true"><span /></div>

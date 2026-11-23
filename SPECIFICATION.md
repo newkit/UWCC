@@ -521,7 +521,30 @@ Status on 2026-11-23:
     pickers on a desktop browser.
   - Missing: free-space check, resuming a queue after the page was closed,
     sub-folders, videos (shown as "not supported yet").
-- M4, M6 onwards: not started.
+- M4 (after M5 at the owner's request): first version.
+  - Analysis: a frame every 2 seconds (at most 60 per clip) goes through the
+    same analysis as photos; the resulting corrections are lightly smoothed
+    and interpolated per frame.
+  - Editor: the clip plays through the correction shader with play, pause
+    and scrubbing; all manual controls, split view and hold-for-original
+    work on video.
+  - Export: demux → decode → shader → encode → mux with WebCodecs. Audio is
+    copied unchanged, frame count and timing are kept, rotation metadata is
+    applied to the pixels. The source codec is kept where the device can
+    encode it, otherwise H.264; the bitrate follows the source. The result is
+    written to a temporary file in the browser's private storage and
+    delivered from there, so clip length is not limited by memory.
+  - Videos run through the same queue, settings and output modes as photos
+    (after the photos in a batch). Results carry the metadata comment
+    `UWCC corrected` and are skipped when added again. Overwrite replaces
+    MP4 sources only.
+  - Verified in a headless Chromium with software codecs on generated
+    H.264 clips, including one with rotation metadata. Not verified: real
+    camera footage, HEVC, 4K, hardware codecs, speed, Safari, phones.
+  - Missing: HDR / 10-bit handling (not detected yet), a video quality
+    setting, and the smoothing can soften the correction for about 2 seconds
+    around an abrupt change such as a light switching on.
+- M6 onwards: not started.
 
 ## 10. Risks
 

@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import type { Job } from '../batch/queue';
 import { type LoadedPhoto, loadPhoto } from '../io/importPhoto';
 import { type Adjustments, type Analysis, IDENTITY_CORRECTION } from '../model';
+import { correctionAt } from '../video/keys';
 import { Controls } from './Controls';
+import { useVideo } from './useVideo';
 import { Viewer } from './Viewer';
 
 type Props = {
@@ -15,26 +17,36 @@ type Props = {
   onError: (message: string) => void;
 };
 
-function describe(analysis: Analysis): string {
+function describe(analysis: Analysis, video: boolean): string {
   const loss = Math.round(analysis.depletion * 100);
-  if (analysis.depletion < 0.05) return 'Red is healthy in this photo, so no automatic correction was applied.';
-  if (analysis.depletion < 0.6) return `Red is partly lost (${loss}%). A reduced correction was applied.`;
-  return `Red is almost gone (${loss}% lost). Full correction applied.`;
+  const what = video ? 'at the start of this clip' : 'in this photo';
+  if (analysis.depletion < 0.05) return `Red is healthy ${what}, so no automatic correction was applied.`;
+  if (analysis.depletion < 0.6) return `Red is partly lost ${what} (${loss}%). A reduced correction was applied.`;
+  return `Red is almost gone ${what} (${loss}% lost). Full correction applied.`;
 }
 
+const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
+
 export function EditorView({ job, multiple, busy, onChange, onApplyToAll, onError }: Props) {
+  const isVideo = job.source.kind === 'video';
   const [photo, setPhoto] = useState<LoadedPhoto | null>(null);
   const [compare, setCompare] = useState(false);
   const [showOriginal, setShowOriginal] = useState(false);
+  const video = useVideo(isVideo ? job.source.file : null);
 
   useEffect(() => {
-    let current = true;
     setPhoto(null);
+    if (isVideo) return;
+    let current = true;
     loadPhoto(job.source.file, job.source.name)
       .then((loaded) => { if (current) setPhoto(loaded); })
       .catch((e) => { if (current) onError(e instanceof Error ? e.message : String(e)); });
     return () => { current = false; };
-  }, [job.id, job.source, onError]);
+  }, [job.id, job.source, isVideo, onError]);
+
+  useEffect(() => {
+    if (video.error) onError(video.error);
+  }, [video.error, onError]);
 
   const hold = {
     onPointerDown: () => setShowOriginal(true),
@@ -46,21 +58,38 @@ export function EditorView({ job, multiple, busy, onChange, onApplyToAll, onErro
     onBlur: () => setShowOriginal(false),
   };
 
-  const waiting = !photo || job.status === 'analyzing';
-  const status = busy ?? (waiting ? 'Opening photo…' : null);
+  const shown = isVideo ? video.ready && video.element : photo;
+  const waiting = !shown || job.status === 'analyzing';
+  const status = busy ?? (waiting ? (isVideo ? 'Opening video…' : 'Opening photo…') : null);
+  const correction = !job.analysis
+    ? IDENTITY_CORRECTION
+    : job.video ? correctionAt(job.video.keys, video.time) : job.analysis.correction;
+  const size = isVideo ? { width: video.width, height: video.height } : photo ? { width: photo.width, height: photo.height } : null;
 
   return (
     <main className="editor">
       <section className="view">
-        {photo && (
+        {isVideo && video.ready && video.element && (
           <Viewer
-            photo={photo}
-            correction={job.analysis?.correction ?? IDENTITY_CORRECTION}
-            adjustments={job.adjustments}
-            compare={compare}
-            showOriginal={showOriginal}
-            onError={onError}
+            source={video.element} width={video.width} height={video.height} frame={video.frame} label={job.source.name}
+            correction={correction} adjustments={job.adjustments} compare={compare} showOriginal={showOriginal} onError={onError}
           />
+        )}
+        {!isVideo && photo && (
+          <Viewer
+            source={photo.preview} width={photo.preview.width} height={photo.preview.height} label={job.source.name}
+            correction={correction} adjustments={job.adjustments} compare={compare} showOriginal={showOriginal} onError={onError}
+          />
+        )}
+        {isVideo && video.ready && (
+          <div className="transport">
+            <button type="button" onClick={video.toggle} aria-label={video.playing ? 'Pause' : 'Play'}>{video.playing ? 'Pause' : 'Play'}</button>
+            <input
+              type="range" min={0} max={video.duration || 0} step={0.01} value={Math.min(video.time, video.duration || 0)}
+              onChange={(e) => video.seek(Number(e.target.value))} aria-label="Position in the clip"
+            />
+            <span>{clock(video.time)} / {clock(video.duration)}</span>
+          </div>
         )}
         {status && <div className="busy" role="status">{status}</div>}
       </section>
@@ -71,14 +100,19 @@ export function EditorView({ job, multiple, busy, onChange, onApplyToAll, onErro
           </button>
           <button type="button" className="ghost" {...hold}>Hold for original</button>
         </div>
-        {job.analysis && <p className="info">{describe(job.analysis)}</p>}
+        {job.analysis && <p className="info">{describe(job.analysis, isVideo)}</p>}
+        {job.video && job.video.keys.times.length > 1 && (
+          <p className="info">The correction follows the clip: it was measured at {job.video.keys.times.length} points and changes smoothly between them.</p>
+        )}
         <Controls adjustments={job.adjustments} onChange={onChange} disabled={!!busy || waiting} />
         {multiple && (
           <button type="button" className="ghost wide" onClick={onApplyToAll} disabled={!!busy || waiting}>
-            Apply these adjustments to all photos
+            Apply these adjustments to all files
           </button>
         )}
-        <p className="meta">{job.source.name}{photo ? ` · ${photo.width} × ${photo.height}` : ''}</p>
+        <p className="meta">
+          {job.source.name}{size ? ` · ${size.width} × ${size.height}` : ''}{job.video ? ` · ${clock(job.video.duration)} · ${job.video.codec}` : ''}
+        </p>
       </aside>
     </main>
   );

@@ -21,6 +21,7 @@ const STATUS: Record<Job['status'], string> = {
 };
 
 const megabytes = (bytes: number) => `${(bytes / 1048576).toFixed(1)} MB`;
+const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 export function QueueView({ jobs, run, destination, startLabel, onEdit, onRemove, onStart, onCancel, onRetry, onDismissSummary }: Props) {
@@ -29,6 +30,7 @@ export function QueueView({ jobs, run, destination, startLabel, onEdit, onRemove
   const left = count('skipped') + count('unsupported');
   const active = !!run?.active;
   const notes = jobs.filter((j) => j.status === 'done' && j.result?.note);
+  const noun = jobs.some((j) => j.source.kind === 'video') ? 'file' : 'photo';
 
   return (
     <main className="queue">
@@ -42,10 +44,10 @@ export function QueueView({ jobs, run, destination, startLabel, onEdit, onRemove
         ) : run ? (
           <div className="summary" role="status">
             <div className="queue-title">
-              {run.cancelled ? 'Cancelled. ' : ''}{plural(done, 'photo')} corrected{failed ? `, ${failed} failed` : ''}{left ? `, ${left} left out` : ''}
+              {run.cancelled ? 'Cancelled. ' : ''}{plural(done, noun)} corrected{failed ? `, ${failed} failed` : ''}{left ? `, ${left} left out` : ''}
             </div>
             <p>{destination}</p>
-            {notes.length > 0 && <p className="warning">{plural(notes.length, 'photo')} could not be saved as requested; see the notes below.</p>}
+            {notes.length > 0 && <p className="warning">{plural(notes.length, noun)} could not be saved as requested; see the notes below.</p>}
             <div className="summary-actions">
               {failed > 0 && <button type="button" className="primary" onClick={onRetry}>Retry failed</button>}
               {ready > 0 && <button type="button" className="primary" onClick={onStart}>{startLabel}</button>}
@@ -56,7 +58,7 @@ export function QueueView({ jobs, run, destination, startLabel, onEdit, onRemove
           <>
             <div>
               <div className="queue-title">
-                {plural(ready, 'photo')} ready{analyzing ? `, ${analyzing} being analysed` : ''}{left ? `, ${left} left out` : ''}
+                {plural(ready, noun)} ready{analyzing ? `, ${analyzing} being analysed` : ''}{left ? `, ${left} left out` : ''}
               </div>
               <p>{destination}</p>
             </div>
@@ -76,7 +78,7 @@ export function QueueView({ jobs, run, destination, startLabel, onEdit, onRemove
                 <span className="job-text">
                   <span className="job-name">{job.source.name}</span>
                   <span className="job-meta">
-                    {job.width ? `${job.width} × ${job.height} · ` : ''}{megabytes(job.source.file.size)}
+                    {job.video ? `Video ${clock(job.video.duration)} · ` : ''}{job.width ? `${job.width} × ${job.height} · ` : ''}{megabytes(job.source.file.size)}
                   </span>
                   {detail && <span className="job-detail">{detail}</span>}
                   {job.status === 'running' && <progress max={1} value={job.progress ?? 0} aria-label="Progress" />}

@@ -3,6 +3,7 @@ import { alreadyCorrected, createJob, isCancel, type Job, prepare, process } fro
 import { fromDirectory, fromDrop, fromFiles, fsAccess, pickFiles, pickFolder, pickOutputFolder, type Source } from '../io/sources';
 import type { Adjustments } from '../model';
 import { type Settings, useSettings } from '../settings/settings';
+import { removeStaleTempFiles } from '../io/tempFiles';
 import { EditorView } from './EditorView';
 import { QueueView, type RunState } from './QueueView';
 import { SettingsDialog } from './SettingsDialog';
@@ -35,7 +36,7 @@ function describeDestination(jobs: Job[], settings: Settings): string {
         : 'saved to this browser\'s download folder';
   if (settings.outputMode === 'overwrite') {
     if (withHandle.length === 0) return `Originals cannot be replaced here; results are ${next}.`;
-    return `JPEG originals are replaced. Other results are ${next}.`;
+    return `JPEG photos and MP4 videos are replaced. Other results are ${next}.`;
   }
   return `Results are ${next}, with "${settings.suffix}" added to the name.`;
 }
@@ -115,7 +116,10 @@ export function App() {
   const start = useCallback(async (ids: number[], confirmed = false) => {
     if (abort.current) return;
     const current = settingsRef.current;
-    const targets = jobsRef.current.filter((j) => ids.includes(j.id) && j.analysis);
+    // Photos first, so quick results appear early; then videos.
+    const targets = jobsRef.current
+      .filter((j) => ids.includes(j.id) && j.analysis)
+      .sort((a, b) => Number(!!a.video) - Number(!!b.video));
     if (targets.length === 0) return;
     if (current.outputMode === 'overwrite' && !confirmed && targets.some((j) => j.source.handle)) {
       setConfirm(ids);
@@ -194,6 +198,8 @@ export function App() {
     };
   }, [addSources]);
 
+  useEffect(() => { void removeStaleTempFiles(); }, []);
+
   // Hook for automated tests: add a folder without going through the system picker.
   useEffect(() => {
     (window as unknown as { uwccTest?: object }).uwccTest = {
@@ -206,9 +212,12 @@ export function App() {
   const active = !!run?.active;
   const readyIds = jobs.filter((j) => j.status === 'ready').map((j) => j.id);
   const overwrite = settings.outputMode === 'overwrite' && jobs.some((j) => j.source.handle);
-  const startLabel = overwrite ? `Replace ${plural(readyIds.length, 'original')}` : `Correct ${plural(readyIds.length, 'photo')}`;
+  const noun = jobs.some((j) => j.source.kind === 'video') ? 'file' : 'photo';
+  const startLabel = overwrite ? `Replace ${plural(readyIds.length, 'original')}` : `Correct ${plural(readyIds.length, noun)}`;
   const busy = editingJob?.status === 'running'
-    ? (editingJob.progress ?? 0) < 0.7 ? `Correcting… ${Math.round(((editingJob.progress ?? 0) / 0.7) * 100)}%` : 'Encoding and saving…'
+    ? editingJob.video
+      ? `Correcting… ${Math.round((editingJob.progress ?? 0) * 100)}%`
+      : (editingJob.progress ?? 0) < 0.7 ? `Correcting… ${Math.round(((editingJob.progress ?? 0) / 0.7) * 100)}%` : 'Encoding and saving…'
     : null;
 
   const remove = (ids: number[]) => {
@@ -218,7 +227,7 @@ export function App() {
   const clearAll = () => { remove(jobs.map((j) => j.id)); setEditing(null); setRun(null); setNotice(null); setError(null); };
   const applyToAll = (adjustments: Adjustments) => {
     setJobs((list) => list.map((job) => ({ ...job, adjustments })));
-    setNotice(`Adjustments applied to all ${jobs.length} photos.`);
+    setNotice(`Adjustments applied to all ${jobs.length} files.`);
   };
 
   return (
@@ -256,13 +265,13 @@ export function App() {
       {jobs.length === 0 ? (
         <main className="welcome">
           <div className="welcome-card">
-            <h2>Bring the colour back to your underwater photos</h2>
-            <p>Open one photo to fine-tune it, or many to correct them all in one go. Everything happens on this device; nothing is uploaded.</p>
+            <h2>Bring the colour back to your underwater photos and videos</h2>
+            <p>Open one file to fine-tune it, or many to correct them all in one go. Everything happens on this device; nothing is uploaded.</p>
             <div className="welcome-buttons">
-              <button type="button" className="primary big" onClick={() => guarded(pickFiles)} disabled={opening}>Open photos</button>
+              <button type="button" className="primary big" onClick={() => guarded(pickFiles)} disabled={opening}>Open photos or videos</button>
               {fsAccess.folders && <button type="button" className="ghost big" onClick={() => guarded(pickFolder)} disabled={opening}>Open a folder</button>}
             </div>
-            <p className="hint">or drop photos{fsAccess.folders ? ' or a folder' : ''} anywhere on this page</p>
+            <p className="hint">or drop files{fsAccess.folders ? ' or a folder' : ''} anywhere on this page</p>
             <div className="samples">
               <span>Try a sample:</span>
               {SAMPLES.map((s) => (
@@ -301,7 +310,7 @@ export function App() {
         <div className="overlay" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
           <div className="confirm">
             <h2 id="confirm-title">Replace {plural(confirm.length, 'original')}?</h2>
-            <p>The corrected photos will take the place of the original files. The originals cannot be restored afterwards.</p>
+            <p>The corrected files will take the place of the originals, which cannot be restored afterwards. Replaced videos are re-encoded, so the original recording quality is lost for good.</p>
             <div className="dialog-actions">
               <button type="button" className="ghost" onClick={() => setConfirm(null)}>Cancel</button>
               <button type="button" className="danger" onClick={() => { const ids = confirm; setConfirm(null); void start(ids, true); }}>Replace</button>

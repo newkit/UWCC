@@ -71,9 +71,11 @@ export function downloadBlob(blob: Blob, name: string) {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
+export type OutputFormat = 'jpg' | 'mp4';
+
 /** `GOPR0042.JPG` -> `GOPR0042_uwcc.jpg` */
-export function outputName(sourceName: string, suffix: string): string {
-  return `${sourceName.replace(/\.[^./\\]+$/, '')}${suffix}.jpg`;
+export function outputName(sourceName: string, suffix: string, format: OutputFormat = 'jpg'): string {
+  return `${sourceName.replace(/\.[^./\\]+$/, '')}${suffix}.${format}`;
 }
 
 /** Does this name look like a result UWCC wrote earlier (`x_uwcc.jpg`, `x_uwcc-2.jpg`)? */
@@ -83,7 +85,8 @@ export function isProcessedName(name: string, suffix: string): boolean {
   return new RegExp(`${escaped}(-\\d+)?$`, 'i').test(base);
 }
 
-const isJpegName = (name: string) => /\.jpe?g$/i.test(name);
+/** Can a result in `format` take the place of a file with this name? */
+const sameFormat = (name: string, format: OutputFormat) => (format === 'jpg' ? /\.jpe?g$/i : /\.(mp4|m4v)$/i).test(name);
 
 /**
  * Deliver one result.
@@ -92,15 +95,16 @@ const isJpegName = (name: string) => /\.jpe?g$/i.test(name);
 export async function deliver(
   source: Source,
   blob: Blob,
-  options: { mode: OutputMode; suffix: string; fallbackDir: FileSystemDirectoryHandle | null },
+  options: { mode: OutputMode; suffix: string; fallbackDir: FileSystemDirectoryHandle | null; format?: OutputFormat },
 ): Promise<WriteResult> {
   let note: string | undefined;
+  const format = options.format ?? 'jpg';
 
   if (options.mode === 'overwrite') {
     if (!source.handle) {
       note = 'This browser gave no write access to the original, so it was not replaced.';
-    } else if (!isJpegName(source.name)) {
-      note = 'The original is not a JPEG, so it was kept and the result saved as a new file.';
+    } else if (!sameFormat(source.name, format)) {
+      note = `The original is not ${format === 'jpg' ? 'a JPEG' : 'an MP4'} file, so it was kept and the result saved as a new file.`;
     } else if (!(await ensureWritable(source.handle))) {
       note = 'Write access to the original was not granted, so it was not replaced.';
     } else {
@@ -109,7 +113,7 @@ export async function deliver(
     }
   }
 
-  const name = outputName(source.name, options.suffix);
+  const name = outputName(source.name, options.suffix, format);
   const dir = source.dir ?? options.fallbackDir;
   if (dir && (await ensureWritable(dir))) {
     const finalName = await freeName(dir, name);
