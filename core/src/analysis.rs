@@ -3,8 +3,12 @@
 //! Works in linear light on a small copy of the image. The method is UWCC's
 //! own, built from measurements on reference pairs (SPECIFICATION.md §6.5):
 //!
-//! 1. Measure how depleted red is. A healthy red channel (shallow water,
-//!    flash, video light) scales the whole correction down to nothing.
+//! 1. Measure two things about red. *Depletion*: how weak red is overall,
+//!    which decides how much of it is rebuilt from green. *Cast*: whether
+//!    even the warmest parts of the frame lack red, which decides how
+//!    strongly the whole correction is applied. A frame with properly
+//!    coloured content (shallow water, flash, video light) has no cast and
+//!    is left alone.
 //! 2. Estimate the colour of open water from the pixels with the lowest
 //!    green/blue ratio.
 //! 3. Rebuild red as green minus a share of blue, so that open water gets no
@@ -17,16 +21,27 @@
 use crate::color::srgb_to_linear;
 use crate::model::Correction;
 
-/// Red counts as fully healthy when mean red reaches this share of mean green.
+/// Red needs no rebuilding when mean red reaches this share of mean green.
 const HEALTHY_RED_RATIO: f32 = 0.5;
+/// The cast is judged on the warmest pixels: this percentile of red/green
+/// among the brighter part of the frame.
+const WARM_PERCENTILE: f32 = 95.0;
+/// Pixels darker than this percentile of green are ignored when judging the cast.
+const WARM_MIN_BRIGHTNESS_PERCENTILE: f32 = 25.0;
+/// Warmest red/green at or above the first value: no cast, no correction.
+/// At or below the second: full correction. Linear in between.
+const CAST_RANGE: (f32, f32) = (0.95, 0.6);
 /// Share of blue removed from the rebuilt red, relative to the water ratio.
 const WATER_SUBTRACT: f32 = 1.5;
 /// Scene weight ramps up between these positions in the green/blue ratio range.
 const SCENE_RAMP: (f32, f32) = (0.2, 0.6);
 /// Below this relative spread of the ratio, the frame has no distinct open water.
 const MIN_RATIO_SPREAD: f32 = 0.15;
-/// Black-point percentiles: rebuilt red, green, blue.
-const BLACK_PERCENTILE: [f32; 3] = [20.0, 0.5, 0.5];
+/// Black-point percentile for green and blue, and for red that is not rebuilt.
+const BLACK_PERCENTILE: f32 = 0.5;
+/// Black-point percentile for fully rebuilt red: high, so that open water
+/// and deep shadows get no red. Interpolated by depletion.
+const BLACK_PERCENTILE_REBUILT_RED: f32 = 20.0;
 /// The brightest channel's scene highlights (this percentile) map to `WHITE_LEVEL`.
 const WHITE_PERCENTILE: f32 = 99.5;
 const WHITE_LEVEL: f32 = 0.68;
@@ -35,10 +50,12 @@ const MAX_GAIN: f32 = 8.0;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Analysis {
-    /// Ready to use: already scaled by `depletion`.
+    /// Ready to use: already scaled by `strength`.
     pub correction: Correction,
-    /// 0 = red is healthy, 1 = red is absent.
+    /// 0 = red is healthy, 1 = red is absent. Decides how much red is rebuilt from green.
     pub depletion: f32,
+    /// 0 = no colour cast, correction not applied; 1 = full correction.
+    pub strength: f32,
     /// Share of the frame treated as scene rather than open water.
     pub scene_fraction: f32,
     /// Green/blue ratio of open water.
@@ -46,8 +63,13 @@ pub struct Analysis {
 }
 
 impl Analysis {
-    const NEUTRAL: Analysis =
-        Analysis { correction: Correction::IDENTITY, depletion: 0.0, scene_fraction: 1.0, water_ratio: 0.0 };
+    const NEUTRAL: Analysis = Analysis {
+        correction: Correction::IDENTITY,
+        depletion: 0.0,
+        strength: 0.0,
+        scene_fraction: 1.0,
+        water_ratio: 0.0,
+    };
 }
 
 /// Analyse an RGBA8 sRGB buffer.
@@ -79,8 +101,20 @@ pub fn analyze_linear(px: &[[f32; 3]]) -> Analysis {
         return Analysis::NEUTRAL; // essentially black; nothing to measure
     }
 
-    // 1. Red health.
+    // 1. Red health: overall depletion, and the cast on the warmest pixels.
     let depletion = (1.0 - (mean_r / mean_g) as f32 / HEALTHY_RED_RATIO).clamp(0.0, 1.0);
+    let green: Vec<f32> = px.iter().map(|p| p[1]).collect();
+    let bright = percentile(&green, WARM_MIN_BRIGHTNESS_PERCENTILE);
+    let warmth: Vec<f32> = px.iter().filter(|p| p[1] > bright).map(|p| p[0] / p[1].max(1e-4)).collect();
+    let warmest = percentile(&warmth, WARM_PERCENTILE);
+    let strength = if warmth.is_empty() {
+        0.0
+    } else {
+        ((CAST_RANGE.0 - warmest) / (CAST_RANGE.0 - CAST_RANGE.1)).clamp(0.0, 1.0)
+    };
+    if strength == 0.0 {
+        return Analysis { depletion, ..Analysis::NEUTRAL };
+    }
 
     // 2. Water colour, from pixels that have a meaningful amount of blue.
     let blue: Vec<f32> = px.iter().map(|p| p[2]).collect();
@@ -118,7 +152,12 @@ pub fn analyze_linear(px: &[[f32; 3]]) -> Analysis {
     let mut lo = [0.0f32; 3];
     for ch in 0..3 {
         let values: Vec<f32> = mixed.iter().map(|p| p[ch]).collect();
-        lo[ch] = percentile(&values, BLACK_PERCENTILE[ch]);
+        let q = if ch == 0 {
+            BLACK_PERCENTILE + (BLACK_PERCENTILE_REBUILT_RED - BLACK_PERCENTILE) * depletion
+        } else {
+            BLACK_PERCENTILE
+        };
+        lo[ch] = percentile(&values, q);
     }
 
     // 5. Balance on scene content.
@@ -156,7 +195,7 @@ pub fn analyze_linear(px: &[[f32; 3]]) -> Analysis {
             [0.0, 0.0, gain[2], -lo[2] * gain[2]],
         ],
     };
-    Analysis { correction: full.scaled(depletion), depletion, scene_fraction, water_ratio }
+    Analysis { correction: full.scaled(strength), depletion, strength, scene_fraction, water_ratio }
 }
 
 fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
@@ -226,10 +265,47 @@ mod tests {
             .collect();
         let a = analyze_linear(&px);
         assert!(a.depletion > 0.9);
+        assert_eq!(a.strength, 1.0);
         let m = a.correction.m;
         assert!(m[0][1] > 0.5, "red should draw on green: {:?}", m[0]);
         assert!(m[0][2] < 0.0, "red should subtract blue: {:?}", m[0]);
         assert!(m.iter().all(|row| row.iter().all(|v| v.is_finite())));
+    }
+
+    /// Red is weak but present everywhere (shallow to medium depth): the
+    /// cast must be removed in full, mostly by raising the real red channel.
+    #[test]
+    fn partial_cast_is_fully_corrected() {
+        // A neutral scene (sand, rock) seen through water: red at 32 % of green.
+        // Darker parts are further away and therefore bluer, as in real footage.
+        let px: Vec<[f32; 3]> = (0..3000)
+            .map(|i| {
+                let t = i as f32 / 3000.0;
+                let v = 0.03 + 0.5 * t;
+                [0.32 * v, v, v * (2.2 - 1.1 * t)]
+            })
+            .collect();
+        let a = analyze_linear(&px);
+        assert!(a.depletion > 0.2 && a.depletion < 0.6, "depletion {}", a.depletion);
+        assert_eq!(a.strength, 1.0);
+        // A bright neutral pixel went in with red at 0.32 x green and blue at 1.15 x green.
+        // It must come out without the cast; slightly warm highlights are intended.
+        let m = a.correction.m;
+        let p = [0.32 * 0.5, 0.5, 1.15 * 0.5];
+        let out: Vec<f32> = (0..3).map(|ch| m[ch][0] * p[0] + m[ch][1] * p[1] + m[ch][2] * p[2] + m[ch][3]).collect();
+        let (red, blue) = (out[0] / out[1], out[2] / out[1]);
+        assert!((0.8..=1.35).contains(&red), "red/green after correction: {out:?}");
+        assert!((0.65..=1.1).contains(&blue), "blue/green after correction: {out:?}");
+    }
+
+    /// Properly coloured content somewhere in the frame means there is no cast to remove.
+    #[test]
+    fn warm_content_blocks_the_correction() {
+        let mut px: Vec<[f32; 3]> = (0..2000).map(|i| [0.01, 0.1 + 0.2 * (i as f32 / 2000.0), 0.6]).collect();
+        px.extend((0..400).map(|i| [0.5 + 0.2 * (i as f32 / 400.0), 0.3, 0.25])); // lit, red subject
+        let a = analyze_linear(&px);
+        assert_eq!(a.strength, 0.0);
+        assert_eq!(a.correction, Correction::IDENTITY);
     }
 
     #[test]

@@ -320,24 +320,41 @@ still too few to tune on.
 **Implemented method** (`core/src/analysis.rs`, constants at the top of the
 file). In linear light, on a copy of about 256 px:
 
-1. Red health: mean red relative to mean green. At half of green or more,
-   red counts as healthy and the whole correction scales to nothing.
+1. Red health, measured two ways:
+   - *Depletion*: mean red relative to mean green. Below half of green, red
+     is increasingly rebuilt from green; at half or more, the real red
+     channel is used.
+   - *Cast*: the red/green ratio of the warmest 5 % of the brighter pixels.
+     If even those lack red (ratio at or below 0.6), the full correction is
+     applied. If they are properly coloured (0.95 or above), nothing is
+     applied. This is what leaves flash and shallow shots alone.
 2. Water colour: the 2nd percentile of the green/blue ratio.
 3. Rebuilt red: green minus 1.5 x that ratio x blue.
-4. Black points: 20th percentile for rebuilt red (so open water and deep
-   shadows get no red), 0.5th for green and blue.
+4. Black points: 0.5th percentile for green and blue; for red between the
+   0.5th (real red) and the 20th (fully rebuilt red, so open water and deep
+   shadows get no red), by depletion.
 5. Channel balance on scene content only: pixels are weighted by where their
    green/blue ratio lies between water and scene; open water gets weight 0.
 6. Common white level (scene highlights to 0.68 linear), gains capped at 8.
 
 Mean error against the targets, per channel RMS on 0..1 sRGB values, with the
-uncorrected original in brackets: turtle 0.023 (0.235), dolphins 0.035
-(0.299), coral 0.048 (0.236). The flash photo is left unchanged. These numbers
+uncorrected original in brackets: turtle 0.021 (0.235), dolphins 0.035
+(0.299), coral 0.047 (0.236). The flash photo is left unchanged. These numbers
 are regression thresholds in `core/tests/reference_images.rs`.
 
-Caveat: the constants were tuned on these three pairs, all deep-blue water
-from similar conditions. They are a starting point and will need revisiting
-with green water, shallow shots and partially depleted red.
+The split into depletion and cast came from the first real video clip from
+the owner (a reef seen from above, red at about a third of green, kept in
+the git-ignored `testdata/local/`). An earlier version scaled the whole
+correction by depletion and removed only a third of that clip's blue cast.
+With the cast measure the sand comes out neutral and the corals brown, while
+the three pairs and the flash photo are unaffected. There is no target image
+for this clip; the result was judged by eye.
+
+Caveat: the constants were tuned on three pairs from similar deep-blue
+conditions plus that one clip. They are a starting point and will need
+revisiting with green water and more shallow footage. When the automatic
+correction decides to apply nothing, the Correction slider cannot force it
+on; that override is not built yet.
 
 ### 6.6 Validation plan (M1)
 
@@ -539,8 +556,11 @@ Status on 2026-11-23:
     `UWCC corrected` and are skipped when added again. Overwrite replaces
     MP4 sources only.
   - Verified in a headless Chromium with software codecs on generated
-    H.264 clips, including one with rotation metadata. Not verified: real
-    camera footage, HEVC, 4K, hardware codecs, speed, Safari, phones.
+    H.264 clips, including one with rotation metadata, and on one real clip
+    from the owner (QuickTime, H.264, 1024x576, variable frame rate): all
+    frames, their timestamps and the audio came through unchanged. Not
+    verified: original camera files, HEVC, 4K, hardware codecs, speed,
+    Safari, phones.
   - Missing: HDR / 10-bit handling (not detected yet), a video quality
     setting, and the smoothing can soften the correction for about 2 seconds
     around an abrupt change such as a light switching on.

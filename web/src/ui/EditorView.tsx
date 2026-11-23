@@ -18,11 +18,11 @@ type Props = {
 };
 
 function describe(analysis: Analysis, video: boolean): string {
-  const loss = Math.round(analysis.depletion * 100);
   const what = video ? 'at the start of this clip' : 'in this photo';
-  if (analysis.depletion < 0.05) return `Red is healthy ${what}, so no automatic correction was applied.`;
-  if (analysis.depletion < 0.6) return `Red is partly lost ${what} (${loss}%). A reduced correction was applied.`;
-  return `Red is almost gone ${what} (${loss}% lost). Full correction applied.`;
+  if (analysis.strength < 0.05) return `Colours already look natural ${what}, so no automatic correction was applied.`;
+  const partial = analysis.strength < 0.95 ? ` Applied at ${Math.round(analysis.strength * 100)}%, because some natural colour is present.` : '';
+  if (analysis.depletion > 0.6) return `Red is almost gone ${what} (${Math.round(analysis.depletion * 100)}% lost), so it was rebuilt from green.${partial}`;
+  return `Red is weak ${what}. The colour cast was removed.${partial}`;
 }
 
 const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;

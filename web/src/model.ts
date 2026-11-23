@@ -30,15 +30,18 @@ export const CONTROLS: ControlSpec[] = [
 /** Result of the automatic analysis. `correction` is row-major 3x4: rows are [fromR, fromG, fromB, offset]. */
 export type Analysis = {
   correction: Float32Array;
+  /** 0 = red is healthy, 1 = red is absent: how much red was rebuilt from green. */
   depletion: number;
   sceneFraction: number;
   waterRatio: number;
+  /** 0 = no colour cast found, nothing applied; 1 = full correction. Already contained in `correction`. */
+  strength: number;
 };
 
 export const IDENTITY_CORRECTION = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0]);
 
 export function analysisFromArray(a: Float32Array): Analysis {
-  return { correction: a.slice(0, 12), depletion: a[12], sceneFraction: a[13], waterRatio: a[14] };
+  return { correction: a.slice(0, 12), depletion: a[12], sceneFraction: a[13], waterRatio: a[14], strength: a[15] };
 }
 
 /** Flat parameter block for the core's reference implementation: matrix (12) + adjustments (6). */

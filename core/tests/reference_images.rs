@@ -52,6 +52,7 @@ fn check_pair(name: &str, max_mean_rmse: f32) {
         analysis.depletion, analysis.scene_fraction
     );
     assert!(analysis.depletion > 0.9, "{name}: red should be detected as depleted");
+    assert_eq!(analysis.strength, 1.0, "{name}: the full correction should apply");
     assert!(mean < max_mean_rmse, "{name}: mean rmse {mean:.4} exceeds {max_mean_rmse}");
     assert!(mean < 0.35 * mean_untouched, "{name}: correction should remove most of the difference to the target");
 }
@@ -95,6 +96,6 @@ fn coral_water_stays_blue() {
 fn flash_photo_is_left_alone() {
     let (before, out, analysis) = corrected("coral_flash.jpg");
     let e = rmse(&before, &out);
-    println!("flash: change {e:?} depletion {:.2}", analysis.depletion);
+    println!("flash: change {e:?} depletion {:.2} strength {:.2}", analysis.depletion, analysis.strength);
     assert!(e.iter().all(|&v| v < 0.02), "flash photo changed too much: {e:?}");
 }
