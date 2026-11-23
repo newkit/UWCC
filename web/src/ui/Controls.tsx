@@ -1,4 +1,4 @@
-import { type Adjustments, CONTROLS, DEFAULT_ADJUSTMENTS } from '../model';
+import { type Adjustments, CONTROLS, DEFAULT_ADJUSTMENTS, hasNeutral } from '../model';
 
 type Props = {
   adjustments: Adjustments;
@@ -7,7 +7,7 @@ type Props = {
 };
 
 export function Controls({ adjustments, onChange, disabled }: Props) {
-  const changed = CONTROLS.some((c) => adjustments[c.key] !== DEFAULT_ADJUSTMENTS[c.key]);
+  const changed = hasNeutral(adjustments) || CONTROLS.some((c) => adjustments[c.key] !== DEFAULT_ADJUSTMENTS[c.key]);
   return (
     <div className="controls">
       {CONTROLS.map((control) => {

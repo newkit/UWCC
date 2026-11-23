@@ -21,7 +21,7 @@ pub mod seathru;
 mod wasm;
 
 pub use analysis::{analyze_linear, analyze_srgb8, Analysis};
-pub use model::{Adjustments, Algorithm, Correction, CORRECTION_LEN};
+pub use model::{Adjustments, Algorithm, Correction, ADJUSTMENTS_LEN, CORRECTION_LEN};
 pub use range::RangeMap;
 
 /// Analyse an RGBA8 sRGB image of `width` x `height` pixels with the chosen method.
@@ -31,5 +31,6 @@ pub fn analyze(algorithm: Algorithm, rgba: &[u8], width: usize, height: usize) -
         Algorithm::Matrix => matrix::analyze(rgba),
         Algorithm::Ancuti => ancuti::analyze(rgba),
         Algorithm::SeaThru => seathru::analyze(rgba, width, height),
+        Algorithm::UwccAlways => analysis::analyze_srgb8_always(rgba),
     }
 }

@@ -17,10 +17,13 @@ type Props = {
   compare: boolean;
   /** Show the untouched original while held. */
   showOriginal: boolean;
+  /** Neutral picker active: the next click on the image reports its position (0..1 from the top left). */
+  picking?: boolean;
+  onPick?: (u: number, v: number) => void;
   onError: (message: string) => void;
 };
 
-export function Viewer({ source, width, height, frame = 0, label, correction, adjustments, compare, showOriginal, onError }: Props) {
+export function Viewer({ source, width, height, frame = 0, label, correction, adjustments, compare, showOriginal, picking = false, onPick, onError }: Props) {
   const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<CorrectionRenderer | null>(null);
@@ -84,13 +87,18 @@ export function Viewer({ source, width, height, frame = 0, label, correction, ad
     setSplit(Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)));
   };
 
+  const pick = (event: React.PointerEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    onPick?.(Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)), Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height)));
+  };
+
   return (
     <div className="stage" ref={stageRef}>
       <div
-        className={'frame' + (compare ? ' comparing' : '')}
+        className={'frame' + (picking ? ' picking' : compare ? ' comparing' : '')}
         style={{ width: box.width, height: box.height }}
-        onPointerDown={compare ? (e) => { e.currentTarget.setPointerCapture(e.pointerId); drag(e); } : undefined}
-        onPointerMove={compare ? drag : undefined}
+        onPointerDown={picking ? pick : compare ? (e) => { e.currentTarget.setPointerCapture(e.pointerId); drag(e); } : undefined}
+        onPointerMove={compare && !picking ? drag : undefined}
       >
         <canvas ref={canvasRef} aria-label={`Preview of ${label}`} />
         {compare && !showOriginal && (

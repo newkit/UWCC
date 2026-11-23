@@ -77,8 +77,7 @@ impl Analysis {
     };
 }
 
-/// Analyse an RGBA8 sRGB buffer.
-pub fn analyze_srgb8(rgba: &[u8]) -> Analysis {
+fn linear_pixels(rgba: &[u8]) -> Vec<[f32; 3]> {
     let px: Vec<[f32; 3]> = rgba
         .as_chunks::<4>()
         .0
@@ -91,11 +90,27 @@ pub fn analyze_srgb8(rgba: &[u8]) -> Analysis {
             ]
         })
         .collect();
-    analyze_linear(&px)
+    px
+}
+
+/// Analyse an RGBA8 sRGB buffer.
+pub fn analyze_srgb8(rgba: &[u8]) -> Analysis {
+    analyze_with(&linear_pixels(rgba), false)
+}
+
+/// As [`analyze_srgb8`], but the correction is applied in full even where no
+/// colour cast was found: the manual override for frames the cast measure
+/// judges wrongly.
+pub fn analyze_srgb8_always(rgba: &[u8]) -> Analysis {
+    analyze_with(&linear_pixels(rgba), true)
 }
 
 /// Analyse linear-light RGB pixels.
 pub fn analyze_linear(px: &[[f32; 3]]) -> Analysis {
+    analyze_with(px, false)
+}
+
+fn analyze_with(px: &[[f32; 3]], always: bool) -> Analysis {
     let n = px.len();
     if n == 0 {
         return Analysis::NEUTRAL;
@@ -112,7 +127,9 @@ pub fn analyze_linear(px: &[[f32; 3]]) -> Analysis {
     let bright = percentile(&green, WARM_MIN_BRIGHTNESS_PERCENTILE);
     let warmth: Vec<f32> = px.iter().filter(|p| p[1] > bright).map(|p| p[0] / p[1].max(1e-4)).collect();
     let warmest = percentile(&warmth, WARM_PERCENTILE);
-    let strength = if warmth.is_empty() {
+    let strength = if always {
+        1.0
+    } else if warmth.is_empty() {
         0.0
     } else {
         ((CAST_RANGE.0 - warmest) / (CAST_RANGE.0 - CAST_RANGE.1)).clamp(0.0, 1.0)
@@ -241,6 +258,20 @@ fn weighted_percentile(values: &[f32], weights: &[f32], q: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn always_applies_where_the_cast_check_would_not() {
+        // Dim but properly coloured content: no cast, so the automatic method leaves it alone.
+        let px: Vec<[f32; 3]> = (0..400)
+            .map(|i| [0.05 + 0.001 * i as f32, 0.04 + 0.0009 * i as f32, 0.03 + 0.0007 * ((i * 37) % 400) as f32])
+            .collect();
+        let auto = analyze_linear(&px);
+        assert_eq!(auto.strength, 0.0);
+        assert_eq!(auto.correction, Correction::IDENTITY);
+        let forced = analyze_with(&px, true);
+        assert_eq!(forced.strength, 1.0);
+        assert_ne!(forced.correction, Correction::IDENTITY);
+    }
 
     #[test]
     fn empty_and_black_are_neutral() {

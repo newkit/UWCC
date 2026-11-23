@@ -69,7 +69,7 @@ export async function alreadyCorrected(source: Source): Promise<boolean> {
 
 /** Identifies what a thumbnail shows, so that it is rendered again when the method or an adjustment changes. */
 export const thumbKey = (job: Pick<Job, 'algorithm' | 'adjustments'>) =>
-  `${job.algorithm}:${CONTROLS.map((c) => job.adjustments[c.key]).join(',')}`;
+  `${job.algorithm}:${CONTROLS.map((c) => job.adjustments[c.key]).join(',')}:${job.adjustments.neutral.join(',')}`;
 
 /** The job's thumbnail with its current method and adjustments (for a video: of the first frame). */
 export async function renderThumb(job: Pick<Job, 'thumbSource' | 'analysis' | 'video' | 'algorithm' | 'adjustments'>): Promise<string> {

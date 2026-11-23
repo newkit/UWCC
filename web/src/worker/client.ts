@@ -46,6 +46,11 @@ export function rangeMap(rgba: Uint8Array, width: number, height: number): Promi
   return call<Float32Array>({ type: 'rangeMap', rgba, width, height });
 }
 
+/** Gains that turn a patch of the source grey after the given correction; empty when the patch is unusable. */
+export function neutralGains(patch: Uint8Array, correction: Float32Array, strength: number, range: number): Promise<Float32Array> {
+  return call<Float32Array>({ type: 'neutral', patch, correction, strength, range });
+}
+
 const NO_RANGE = new Float32Array(0);
 
 /** CPU reference implementation; used for thumbnails and to check the shader. */

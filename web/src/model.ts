@@ -8,13 +8,21 @@ export type Adjustments = {
   exposure: number;
   contrast: number;
   saturation: number;
+  /** Channel gains set by the neutral picker; [1, 1, 1] = none. */
+  neutral: [number, number, number];
 };
+
+/** The adjustments that are plain sliders. */
+export type SliderKey = Exclude<keyof Adjustments, 'neutral'>;
+
+export const NO_NEUTRAL: [number, number, number] = [1, 1, 1];
+export const hasNeutral = (a: Adjustments) => a.neutral.some((g) => g !== 1);
 
 export const DEFAULT_ADJUSTMENTS: Adjustments = {
-  strength: 1, temperature: 0, tint: 0, exposure: 0, contrast: 0, saturation: 0,
+  strength: 1, temperature: 0, tint: 0, exposure: 0, contrast: 0, saturation: 0, neutral: NO_NEUTRAL,
 };
 
-export type ControlSpec = { key: keyof Adjustments; label: string; min: number; max: number; step: number; format: (v: number) => string };
+export type ControlSpec = { key: SliderKey; label: string; min: number; max: number; step: number; format: (v: number) => string };
 
 const signed = (v: number, digits = 0, unit = '') => `${v > 0 ? '+' : ''}${(v * (unit === '%' ? 100 : 1)).toFixed(digits)}${unit}`;
 
@@ -33,6 +41,7 @@ export const ALGORITHMS = [
   { id: 'matrix', core: 1, label: 'Hue-shift matrix' },
   { id: 'ancuti', core: 2, label: 'Ancuti white balance' },
   { id: 'seathru', core: 3, label: 'Sea-thru (estimated range)' },
+  { id: 'uwccAlways', core: 4, label: 'UWCC, always applied' },
 ] as const;
 
 export type Algorithm = (typeof ALGORITHMS)[number]['id'];
@@ -75,11 +84,14 @@ export function analysisFromArray(a: Float32Array): Analysis {
   return { correction: a.slice(0, n), depletion: a[n], sceneFraction: a[n + 1], waterRatio: a[n + 2], strength: a[n + 3] };
 }
 
-/** Flat parameter block for the core's reference implementation: correction + adjustments (6). */
+/** Number of values the adjustments take in the flat form (`ADJUSTMENTS_LEN` in the core). */
+export const ADJUSTMENTS_LEN = 9;
+
+/** Flat parameter block for the core's reference implementation: correction + adjustments. */
 export function packParams(correction: Float32Array, a: Adjustments): Float32Array {
-  const p = new Float32Array(CORRECTION_LEN + 6);
+  const p = new Float32Array(CORRECTION_LEN + ADJUSTMENTS_LEN);
   p.set(correction.subarray(0, CORRECTION_LEN));
-  p.set([a.strength, a.temperature, a.tint, a.exposure, a.contrast, a.saturation], CORRECTION_LEN);
+  p.set([a.strength, a.temperature, a.tint, a.exposure, a.contrast, a.saturation, ...a.neutral], CORRECTION_LEN);
   return p;
 }
 
@@ -91,7 +103,8 @@ export function shaderValues(a: Adjustments) {
   const g = [Math.exp(WB_RANGE * a.temperature), Math.exp(-WB_RANGE * a.tint), Math.exp(-WB_RANGE * a.temperature)];
   const norm = LUMA[0] * g[0] + LUMA[1] * g[1] + LUMA[2] * g[2];
   return {
-    whiteBalance: g.map((x) => x / norm) as [number, number, number],
+    // Temperature and tint keep brightness; the neutral picker's gains multiply in.
+    whiteBalance: g.map((x, i) => (x / norm) * a.neutral[i]) as [number, number, number],
     exposure: 2 ** a.exposure,
     contrast: 2 ** a.contrast,
   };

@@ -2,7 +2,7 @@
 
 use wasm_bindgen::prelude::*;
 
-use crate::model::{Adjustments, Algorithm, Correction, CORRECTION_LEN};
+use crate::model::{Adjustments, Algorithm, Correction, ADJUSTMENTS_LEN, CORRECTION_LEN};
 use crate::range::RangeMap;
 
 /// Analyse an RGBA8 sRGB image (a small copy is enough, about 256 px on the
@@ -32,15 +32,28 @@ pub fn range_map(rgba: &[u8], width: u32, height: u32) -> Vec<f32> {
 /// Apply the reference implementation in place to an RGBA8 buffer.
 ///
 /// `params` holds the correction in its flat form (`CORRECTION_LEN` values),
-/// then strength, temperature, tint, exposure, contrast, saturation.
+/// then the adjustments in theirs (`ADJUSTMENTS_LEN` values).
 /// `range` is a range map as returned by `range_map`, or empty.
 #[wasm_bindgen]
 pub fn apply_reference(rgba: &mut [u8], width: u32, params: &[f32], range: &[f32]) {
-    if params.len() < CORRECTION_LEN + 6 {
+    if params.len() < CORRECTION_LEN + ADJUSTMENTS_LEN {
         return;
     }
     let c = Correction::from_array(&params[..CORRECTION_LEN]);
-    let a = Adjustments::from_array(&params[CORRECTION_LEN..CORRECTION_LEN + 6]);
+    let a = Adjustments::from_array(&params[CORRECTION_LEN..CORRECTION_LEN + ADJUSTMENTS_LEN]);
     let map = RangeMap::from_flat(range);
     crate::reference::apply_rgba8(rgba, width as usize, &c, &a, map.as_ref());
+}
+
+/// The neutral picker: channel gains that turn an RGBA8 patch of the source
+/// image grey. `correction` is in its flat form; `range` is the range-map
+/// value at the patch. Returns three gains, or nothing when the patch is too
+/// dark or clipped.
+#[wasm_bindgen]
+pub fn neutral_gains(patch: &[u8], correction: &[f32], strength: f32, range: f32) -> Vec<f32> {
+    if correction.len() < CORRECTION_LEN {
+        return Vec::new();
+    }
+    let c = Correction::from_array(&correction[..CORRECTION_LEN]);
+    crate::reference::neutral_gains(patch, &c, strength, range).map(|g| g.to_vec()).unwrap_or_default()
 }

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { currentAnalysis, type Job } from '../batch/queue';
 import { type LoadedPhoto, loadPhoto } from '../io/importPhoto';
-import { ALGORITHMS, type Adjustments, type Algorithm, type Analysis, IDENTITY_CORRECTION } from '../model';
+import { ALGORITHMS, type Adjustments, type Algorithm, type Analysis, IDENTITY_CORRECTION, NO_NEUTRAL, hasNeutral } from '../model';
+import { pickNeutral } from '../render/neutral';
 import { correctionAt } from '../video/keys';
 import { Controls } from './Controls';
 import { useVideo } from './useVideo';
@@ -22,6 +23,7 @@ type Props = {
 const METHOD_NOTES: Record<Exclude<Algorithm, 'uwcc'>, string> = {
   matrix: 'Borrows red from green and blue by shifting the hue, then stretches each channel to full range. Always applies in full; very blue footage can turn pink.',
   ancuti: 'White balance after Ancuti et al. (2018): adds red where there is green, then balances the channels to grey. Always applies in full.',
+  uwccAlways: 'UWCC\'s own correction without its check for a colour cast: applied in full even where the colours already look natural. Use it when the automatic choice leaves a file uncorrected.',
   seathru: 'The Sea-thru model (Akkaynak and Treibitz, 2019): removes haze and restores colour by distance. The distance is estimated from the image, because no depth map is available. Experimental; it needs some red left in the footage.',
 };
 
@@ -41,10 +43,12 @@ export function EditorView({ job, multiple, busy, onChange, onAlgorithm, onApply
   const [photo, setPhoto] = useState<LoadedPhoto | null>(null);
   const [compare, setCompare] = useState(false);
   const [showOriginal, setShowOriginal] = useState(false);
+  const [picking, setPicking] = useState(false);
   const video = useVideo(isVideo ? job.source.file : null);
 
   useEffect(() => {
     setPhoto(null);
+    setPicking(false);
     if (isVideo) return;
     let current = true;
     loadPhoto(job.source.file, job.source.name)
@@ -74,6 +78,17 @@ export function EditorView({ job, multiple, busy, onChange, onAlgorithm, onApply
   const correction = !analysis
     ? IDENTITY_CORRECTION
     : job.video ? correctionAt(job.video.keys[job.algorithm], video.time) : analysis.correction;
+  const view = isVideo
+    ? video.ready && video.element ? { source: video.element, width: video.width, height: video.height } : null
+    : photo ? { source: photo.preview, width: photo.preview.width, height: photo.preview.height } : null;
+  const pick = (u: number, v: number) => {
+    setPicking(false);
+    if (!view) return;
+    const adjustments = job.adjustments;
+    pickNeutral(view.source, view.width, view.height, u, v, correction, adjustments.strength)
+      .then((neutral) => onChange({ ...adjustments, neutral }))
+      .catch((e) => onError(e instanceof Error ? e.message : String(e)));
+  };
   const size = isVideo ? { width: video.width, height: video.height } : photo ? { width: photo.width, height: photo.height } : null;
 
   return (
@@ -82,13 +97,13 @@ export function EditorView({ job, multiple, busy, onChange, onAlgorithm, onApply
         {isVideo && video.ready && video.element && (
           <Viewer
             source={video.element} width={video.width} height={video.height} frame={video.frame} label={job.source.name}
-            correction={correction} adjustments={job.adjustments} compare={compare} showOriginal={showOriginal} onError={onError}
+            correction={correction} adjustments={job.adjustments} compare={compare} showOriginal={showOriginal} picking={picking} onPick={pick} onError={onError}
           />
         )}
         {!isVideo && photo && (
           <Viewer
             source={photo.preview} width={photo.preview.width} height={photo.preview.height} label={job.source.name}
-            correction={correction} adjustments={job.adjustments} compare={compare} showOriginal={showOriginal} onError={onError}
+            correction={correction} adjustments={job.adjustments} compare={compare} showOriginal={showOriginal} picking={picking} onPick={pick} onError={onError}
           />
         )}
         {isVideo && video.ready && (
@@ -119,6 +134,18 @@ export function EditorView({ job, multiple, busy, onChange, onAlgorithm, onApply
         {analysis && <p className="info">{describe(job.algorithm, analysis, isVideo)}</p>}
         {job.video && job.video.keys[job.algorithm].times.length > 1 && (
           <p className="info">The correction follows the clip: it was measured at {job.video.keys[job.algorithm].times.length} points and changes smoothly between them.</p>
+        )}
+        <div className="panel-row neutral">
+          <button type="button" className={'ghost toggle' + (picking ? ' on' : '')} aria-pressed={picking} disabled={!!busy || waiting} onClick={() => setPicking(!picking)}>
+            Pick neutral
+          </button>
+          <button type="button" className="ghost" disabled={!!busy || waiting || !hasNeutral(job.adjustments)} onClick={() => onChange({ ...job.adjustments, neutral: NO_NEUTRAL })}>
+            Clear neutral
+          </button>
+        </div>
+        {picking && <p className="info" role="status">Click something in the picture that should be grey or white, such as sand, a tank or a slate.</p>}
+        {!picking && hasNeutral(job.adjustments) && (
+          <p className="info">Balanced on the spot you picked{isVideo ? '; the same balance is used for the whole clip' : ''}.</p>
         )}
         <Controls adjustments={job.adjustments} onChange={onChange} disabled={!!busy || waiting} />
         {multiple && (

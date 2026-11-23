@@ -11,10 +11,13 @@ pub enum Algorithm {
     Ancuti = 2,
     /// The Sea-thru image formation model on an estimated range map (`seathru`).
     SeaThru = 3,
+    /// UWCC's own method without its cast check: always applied in full.
+    UwccAlways = 4,
 }
 
 impl Algorithm {
-    pub const ALL: [Algorithm; 4] = [Algorithm::Uwcc, Algorithm::Matrix, Algorithm::Ancuti, Algorithm::SeaThru];
+    pub const ALL: [Algorithm; 5] =
+        [Algorithm::Uwcc, Algorithm::Matrix, Algorithm::Ancuti, Algorithm::SeaThru, Algorithm::UwccAlways];
 
     pub fn from_id(id: u32) -> Option<Algorithm> {
         Algorithm::ALL.into_iter().find(|a| *a as u32 == id)
@@ -142,17 +145,39 @@ pub struct Adjustments {
     pub contrast: f32,
     /// -1 (greyscale) .. 1.
     pub saturation: f32,
+    /// Channel gains from the neutral picker (`reference::neutral_gains`); 1 = none.
+    pub neutral: [f32; 3],
 }
+
+/// Number of values in the flat form of [`Adjustments`].
+pub const ADJUSTMENTS_LEN: usize = 9;
 
 impl Default for Adjustments {
     fn default() -> Self {
-        Adjustments { strength: 1.0, temperature: 0.0, tint: 0.0, exposure: 0.0, contrast: 0.0, saturation: 0.0 }
+        Adjustments {
+            strength: 1.0,
+            temperature: 0.0,
+            tint: 0.0,
+            exposure: 0.0,
+            contrast: 0.0,
+            saturation: 0.0,
+            neutral: [1.0; 3],
+        }
     }
 }
 
 impl Adjustments {
-    /// Order: strength, temperature, tint, exposure, contrast, saturation.
+    /// Order: strength, temperature, tint, exposure, contrast, saturation, neutral gains (3).
+    /// `a` must hold [`ADJUSTMENTS_LEN`] values.
     pub fn from_array(a: &[f32]) -> Adjustments {
-        Adjustments { strength: a[0], temperature: a[1], tint: a[2], exposure: a[3], contrast: a[4], saturation: a[5] }
+        Adjustments {
+            strength: a[0],
+            temperature: a[1],
+            tint: a[2],
+            exposure: a[3],
+            contrast: a[4],
+            saturation: a[5],
+            neutral: [a[6], a[7], a[8]],
+        }
     }
 }

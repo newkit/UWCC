@@ -385,6 +385,7 @@ pixel's range; apply a 3x4 matrix; then the manual adjustments as before.
 | Method | Source | What is implemented | What is not |
 |--------|--------|---------------------|-------------|
 | UWCC | This project, §6.5 | Everything | |
+| UWCC, always applied | This project | The same correction without the cast check of §6.5: applied in full on every frame. The manual override for files the check leaves uncorrected | |
 | Hue-shift matrix | The idea of the GPL tools in §6.3. There is no paper | Red borrowed from green and blue by rotating the hue (the standard hue-rotation matrix of the W3C Filter Effects specification) until mean red reaches 60/255, at most 120 degrees; then each channel stretched between its 0.5th and 99.5th percentile. On encoded values | Written from the description in §6.3, not from the GPL sources; constants and the choice of levels are UWCC's, so results differ from those tools |
 | Ancuti white balance | Ancuti, Ancuti, De Vleeschouwer, Bekaert: "Color Balance and Fusion for Underwater Image Enhancement", IEEE TIP 2018 | The white-balance stage: red compensation `r + (mean_g - mean_r)(1 - r) g`, blue compensation in green water, grey-world gains. On encoded values | The multi-scale fusion (gamma-corrected and sharpened inputs blended over Laplacian pyramids): spatial, not per-pixel |
 | Sea-thru (estimated range) | Akkaynak, Treibitz: "Sea-thru: A Method for Removing Water from Underwater Images", CVPR 2019 | The paper's image formation model and estimation steps: backscatter fitted to the darkest 1 % of pixels in ten range bins; illuminant by local space average colour among neighbours of similar range; attenuation coefficient as a two-term exponential of range; recovery and grey-world balance. In linear light | **The range map.** The paper measures range with stereo or structure from motion. UWCC has one image and estimates relative range from colour (below). Also: 8-bit JPEG or video instead of linear RAW; a simpler attenuation fit; caps on the gains. Listed at the top of `core/src/seathru.rs` |
@@ -431,6 +432,17 @@ Only UWCC's own method has numeric regression thresholds. The others are
 covered by unit tests on synthetic input (including a scene rendered through
 Sea-thru's own model, which it must turn grey again) and by a check that
 each gives finite parameters and a usable image on the reference photos.
+
+**Neutral picker** (F7). Works on top of every method. The user clicks a
+spot that should be grey or white; the core averages a patch there (2 % of
+the image's short side) after the automatic correction, in linear light, and
+returns the channel gains that make the mean grey at unchanged luminance
+(`reference::neutral_gains`). The gains are part of the adjustments and
+multiply into the white-balance step, so there is no new pipeline step.
+Each gain is limited to 1/8 .. 8: where a channel holds no signal the patch
+does not become fully grey. Spots that are nearly black or clipped are
+refused. For video the gains are picked on the frame shown and apply to the
+whole clip. They are copied by "apply to all" like the other adjustments.
 
 **In the queue.** The setting "Correction method for new files" chooses the
 method items start with (UWCC unless changed). Thumbnails are rendered by the
@@ -594,8 +606,8 @@ Status on 2026-11-23:
   CPU reference exactly in a software-rendered browser; real GPUs still to
   be checked through the in-app self-test.
 - M2: first version live: open or drop a photo, automatic correction, six
-  manual controls with reset, split view, hold for original. Missing: zoom
-  and pan, neutral picker.
+  manual controls with reset, split view, hold for original, neutral picker.
+  Missing: zoom and pan.
 - M3: full-resolution tiled JPEG export works, with quality from the
   settings. Missing: EXIF metadata is not copied yet, PNG output.
 - M5 (done before M4 at the owner's request), photos only:
@@ -645,6 +657,8 @@ Status on 2026-11-23:
   CPU reference to within 1 of 255 on every branch of the pipeline, in a
   software-rendered browser. Verified headless on photos (including a
   multi-tile export) and on the owner's clip. Not verified on real GPUs.
+- Neutral picker (F7) and the "UWCC, always applied" method as manual
+  override (§6.7): done, verified headless on photos and a clip.
 - Default-method setting and thumbnails that follow each item's method and
   adjustments (F19): done, verified headless.
 - M6 onwards: not started.

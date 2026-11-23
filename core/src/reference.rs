@@ -10,12 +10,18 @@ use crate::range::RangeMap;
 /// How strongly temperature and tint move the channel gains at the slider ends.
 pub const WB_RANGE: f32 = 0.4;
 
-/// One pixel: sRGB-encoded 0..1 in, sRGB-encoded 0..1 out. `range` is the
-/// range-map value at the pixel; it is only used when `c.ranged` is set.
-pub fn apply_pixel(srgb: [f32; 3], c: &Correction, a: &Adjustments, range: f32) -> [f32; 3] {
+/// Largest and smallest gain the neutral picker may set on a channel.
+pub const NEUTRAL_GAIN_LIMIT: f32 = 8.0;
+/// A picked patch must be brighter than this (linear luminance) to carry a colour worth balancing.
+const NEUTRAL_MIN_LUMA: f32 = 0.004;
+/// ... and no channel of its mean may exceed this: a clipped patch has lost its colour.
+const NEUTRAL_MAX_VALUE: f32 = 0.95;
+
+/// Step 1 of the pipeline for one pixel: the automatic correction, blended
+/// with the original by `strength`. sRGB-encoded 0..1 in, linear light out.
+pub fn corrected_linear(srgb: [f32; 3], c: &Correction, strength: f32, range: f32) -> [f32; 3] {
     let lin = [srgb_to_linear(srgb[0]), srgb_to_linear(srgb[1]), srgb_to_linear(srgb[2])];
 
-    // 1. Automatic correction.
     // 1a. Working values: encoded or linear.
     let mut x = if c.encoded { srgb } else { lin };
     // 1b. Compensation of red and blue from green.
@@ -38,14 +44,46 @@ pub fn apply_pixel(srgb: [f32; 3], c: &Correction, a: &Adjustments, range: f32) 
         if c.encoded {
             corrected = srgb_to_linear(corrected.min(1.0));
         }
-        v[ch] = lin[ch] + (corrected - lin[ch]) * a.strength;
+        v[ch] = lin[ch] + (corrected - lin[ch]) * strength;
     }
+    v
+}
 
-    // 2. White balance: channel gains, normalised to keep brightness.
+/// The neutral picker: channel gains that turn the mean colour of a patch
+/// grey at unchanged luminance. The patch is RGBA8 from the source image; its
+/// colour is taken after the automatic correction, where the gains apply.
+/// `None` when the patch is too dark or clipped to tell its colour.
+pub fn neutral_gains(patch: &[u8], c: &Correction, strength: f32, range: f32) -> Option<[f32; 3]> {
+    let pixels = patch.as_chunks::<4>().0;
+    if pixels.is_empty() {
+        return None;
+    }
+    let mut mean = [0.0f32; 3];
+    for p in pixels {
+        let v = corrected_linear([p[0] as f32 / 255.0, p[1] as f32 / 255.0, p[2] as f32 / 255.0], c, strength, range);
+        for ch in 0..3 {
+            mean[ch] += v[ch] / pixels.len() as f32;
+        }
+    }
+    let luma = LUMA[0] * mean[0] + LUMA[1] * mean[1] + LUMA[2] * mean[2];
+    if luma < NEUTRAL_MIN_LUMA || mean.iter().any(|&m| m > NEUTRAL_MAX_VALUE) {
+        return None;
+    }
+    Some(mean.map(|m| (luma / m.max(1e-6)).clamp(1.0 / NEUTRAL_GAIN_LIMIT, NEUTRAL_GAIN_LIMIT)))
+}
+
+/// One pixel: sRGB-encoded 0..1 in, sRGB-encoded 0..1 out. `range` is the
+/// range-map value at the pixel; it is only used when `c.ranged` is set.
+pub fn apply_pixel(srgb: [f32; 3], c: &Correction, a: &Adjustments, range: f32) -> [f32; 3] {
+    // 1. Automatic correction.
+    let v = corrected_linear(srgb, c, a.strength, range);
+
+    // 2. White balance: channel gains from temperature and tint, normalised
+    // to keep brightness, times the gains of the neutral picker.
     let mut g = [(WB_RANGE * a.temperature).exp(), (-WB_RANGE * a.tint).exp(), (-WB_RANGE * a.temperature).exp()];
     let norm = LUMA[0] * g[0] + LUMA[1] * g[1] + LUMA[2] * g[2];
-    for x in g.iter_mut() {
-        *x /= norm;
+    for (x, n) in g.iter_mut().zip(a.neutral) {
+        *x *= n / norm;
     }
 
     // 3. Exposure, then encode.
@@ -140,6 +178,36 @@ mod tests {
             let out = apply_pixel([0.5; 3], &c, &a, d);
             assert!((out[0] - linear_to_srgb((lin - 0.1) * d.exp())).abs() < 1e-5, "range {d}");
         }
+    }
+
+    #[test]
+    fn neutral_gains_turn_the_patch_grey() {
+        let c = Correction::affine([[0.2, 0.8, 0.0, 0.0], [0.0, 1.1, 0.0, 0.0], [0.0, 0.0, 0.7, 0.0]]);
+        let patch: Vec<u8> = [[40u8, 150, 190, 255], [50, 160, 180, 255], [45, 140, 200, 255]].concat();
+        let neutral = neutral_gains(&patch, &c, 1.0, 0.0).expect("usable patch");
+        let a = Adjustments { neutral, ..Default::default() };
+        // The patch's mean comes out grey; single pixels keep their small differences.
+        let mut mean = [0.0f32; 3];
+        for p in patch.as_chunks::<4>().0 {
+            let v = corrected_linear([p[0] as f32 / 255.0, p[1] as f32 / 255.0, p[2] as f32 / 255.0], &c, 1.0, 0.0);
+            for ch in 0..3 {
+                mean[ch] += v[ch] * a.neutral[ch] / 3.0;
+            }
+        }
+        assert!((mean[0] - mean[1]).abs() < 1e-4 && (mean[1] - mean[2]).abs() < 1e-4, "{mean:?}");
+        // Luminance is kept.
+        let before = corrected_linear([45.0 / 255.0, 150.0 / 255.0, 190.0 / 255.0], &c, 1.0, 0.0);
+        let luma = |v: [f32; 3]| LUMA[0] * v[0] + LUMA[1] * v[1] + LUMA[2] * v[2];
+        assert!((luma(mean) / luma(before) - 1.0).abs() < 0.05);
+    }
+
+    #[test]
+    fn neutral_gains_refuse_black_and_clipped_patches_and_are_bounded() {
+        assert!(neutral_gains(&[0, 0, 0, 255], &Correction::IDENTITY, 1.0, 0.0).is_none());
+        assert!(neutral_gains(&[255, 255, 255, 255], &Correction::IDENTITY, 1.0, 0.0).is_none());
+        assert!(neutral_gains(&[], &Correction::IDENTITY, 1.0, 0.0).is_none());
+        let g = neutral_gains(&[0, 120, 200, 255], &Correction::IDENTITY, 1.0, 0.0).unwrap();
+        assert_eq!(g[0], NEUTRAL_GAIN_LIMIT);
     }
 
     #[test]
