@@ -332,10 +332,12 @@ file). In linear light, on a copy of about 256 px:
      applied. If they are properly coloured (0.95 or above), nothing is
      applied. This is what leaves flash and shallow shots alone.
 2. Water colour: the 2nd percentile of the green/blue ratio.
-3. Rebuilt red: green minus 1.5 x that ratio x blue.
+3. Rebuilt red: green minus 1.5 x that ratio x blue. Where the frame shows
+   no open water, only 60 % of that subtraction is used (see below).
 4. Black points: 0.5th percentile for green and blue; for red between the
    0.5th (real red) and the 20th (fully rebuilt red, so open water and deep
-   shadows get no red), by depletion.
+   shadows get no red), by depletion and by how much open water the frame
+   has.
 5. Channel balance on scene content only: pixels are weighted by where their
    green/blue ratio lies between water and scene; open water gets weight 0.
 6. Common white level (scene highlights to 0.68 linear), gains capped at 8.
@@ -353,8 +355,21 @@ With the cast measure the sand comes out neutral and the corals brown, while
 the three pairs and the flash photo are unaffected. There is no target image
 for this clip; the result was judged by eye.
 
+The open-water measure came from the second clip from the owner (a reef
+close up in blue-green water, no red at all, no open water; also in
+`testdata/local/`). Steps 3 and 4 exist to keep open water blue. On this
+clip the "water" was only the bluest part of the reef, and both steps
+removed its red: the reef came out salmon-orange, sand and shadows
+blue-grey. The frame now counts as having open water as the share of
+water-weighted pixels (step 5) rises from 20 % to 45 %; below that the
+subtraction is reduced and the high red black point is not used. The clip
+comes out with beige reef and light grey sand; the three pairs give exactly
+the same numbers as before. Limit: a subject that fills most of the frame
+in front of a little open water falls below that range, and its water then
+gets some red and turns greyer.
+
 Caveat: the constants were tuned on three pairs from similar deep-blue
-conditions plus that one clip. They are a starting point and will need
+conditions plus those two clips. They are a starting point and will need
 revisiting with green water and more shallow footage. When the automatic
 correction decides to apply nothing, the Correction slider cannot force it
 on; that override is not built yet.

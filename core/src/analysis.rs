@@ -12,8 +12,12 @@
 //! 2. Estimate the colour of open water from the pixels with the lowest
 //!    green/blue ratio.
 //! 3. Rebuild red as green minus a share of blue, so that open water gets no
-//!    red and stays blue.
-//! 4. Subtract a black point per channel.
+//!    red and stays blue. Where the frame shows no open water (a reef or
+//!    sand close up), the share is reduced: the bluest pixels are then only
+//!    shadow or more distant scene, and removing their red in full splits
+//!    the picture into orange and blue.
+//! 4. Subtract a black point per channel; for rebuilt red a high one where
+//!    there is open water.
 //! 5. Balance the channels on scene content only; open water is excluded so
 //!    that a frame full of blue does not turn the reef yellow.
 //! 6. Scale to a common white level, with a cap on the gains to limit noise.
@@ -33,6 +37,12 @@ const WARM_MIN_BRIGHTNESS_PERCENTILE: f32 = 25.0;
 const CAST_RANGE: (f32, f32) = (0.95, 0.6);
 /// Share of blue removed from the rebuilt red, relative to the water ratio.
 const WATER_SUBTRACT: f32 = 1.5;
+/// The frame counts as having open water as the share of water pixels rises
+/// through this range. Below it, the "water" is only the bluest part of the
+/// scene, and the two steps that keep water blue are relaxed.
+const OPEN_WATER_RAMP: (f32, f32) = (0.2, 0.45);
+/// Share of the blue subtraction kept when the frame has no open water.
+const WATER_SUBTRACT_MIN: f32 = 0.6;
 /// Scene weight ramps up between these positions in the green/blue ratio range.
 const SCENE_RAMP: (f32, f32) = (0.2, 0.6);
 /// Below this relative spread of the ratio, the frame has no distinct open water.
@@ -40,7 +50,9 @@ const MIN_RATIO_SPREAD: f32 = 0.15;
 /// Black-point percentile for green and blue, and for red that is not rebuilt.
 const BLACK_PERCENTILE: f32 = 0.5;
 /// Black-point percentile for fully rebuilt red: high, so that open water
-/// and deep shadows get no red. Interpolated by depletion.
+/// and deep shadows get no red. Interpolated by depletion, and used only as
+/// far as the frame has open water: on a frame filled by reef it would turn
+/// the darker fifth of the scene blue-green.
 const BLACK_PERCENTILE_REBUILT_RED: f32 = 20.0;
 /// The brightest channel's scene highlights (this percentile) map to `WHITE_LEVEL`.
 const WHITE_PERCENTILE: f32 = 99.5;
@@ -165,7 +177,10 @@ fn analyze_with(px: &[[f32; 3]], always: bool) -> Analysis {
     let scene_fraction = (weight_sum / n as f64) as f32;
 
     // 3. Rebuild red.
-    let c = WATER_SUBTRACT * water_ratio;
+    // Without open water in the frame, the bluest pixels are reef in shadow or
+    // further away, not water: take less blue out of the rebuilt red there.
+    let open_water = smoothstep(OPEN_WATER_RAMP.0, OPEN_WATER_RAMP.1, 1.0 - scene_fraction);
+    let c = WATER_SUBTRACT * water_ratio * (WATER_SUBTRACT_MIN + (1.0 - WATER_SUBTRACT_MIN) * open_water);
     let red_row = [1.0 - depletion, depletion, -depletion * c];
     let mixed: Vec<[f32; 3]> =
         px.iter().map(|p| [red_row[0] * p[0] + red_row[1] * p[1] + red_row[2] * p[2], p[1], p[2]]).collect();
@@ -175,7 +190,7 @@ fn analyze_with(px: &[[f32; 3]], always: bool) -> Analysis {
     for ch in 0..3 {
         let values: Vec<f32> = mixed.iter().map(|p| p[ch]).collect();
         let q = if ch == 0 {
-            BLACK_PERCENTILE + (BLACK_PERCENTILE_REBUILT_RED - BLACK_PERCENTILE) * depletion
+            BLACK_PERCENTILE + (BLACK_PERCENTILE_REBUILT_RED - BLACK_PERCENTILE) * depletion * open_water
         } else {
             BLACK_PERCENTILE
         };
@@ -304,6 +319,32 @@ mod tests {
         assert!(m[0][1] > 0.5, "red should draw on green: {:?}", m[0]);
         assert!(m[0][2] < 0.0, "red should subtract blue: {:?}", m[0]);
         assert!(m.iter().all(|row| row.iter().all(|v| v.is_finite())));
+    }
+
+    /// A frame filled by scene (no open water) without any red: the result
+    /// must stay close to neutral instead of splitting into orange and blue.
+    #[test]
+    fn red_less_frame_without_open_water_stays_near_neutral() {
+        // Green/blue ratio over 0.4..0.95, independent of brightness; most of
+        // the frame is at the green end, the blue end is a thin tail.
+        let px: Vec<[f32; 3]> = (0..4000)
+            .map(|i| {
+                let ratio = 0.4 + 0.55 * (((i * 61) % 4000) as f32 / 4000.0).powf(0.4);
+                let blue = 0.1 + 0.6 * i as f32 / 4000.0;
+                [0.0, ratio * blue, blue]
+            })
+            .collect();
+        let a = analyze_linear(&px);
+        assert_eq!(a.depletion, 1.0);
+        assert!(a.scene_fraction > 0.7, "scene fraction {}", a.scene_fraction);
+        let m = a.correction.m;
+        let out = |p: [f32; 3]| -> Vec<f32> {
+            (0..3).map(|ch| (m[ch][0] * p[0] + m[ch][1] * p[1] + m[ch][2] * p[2] + m[ch][3]).max(0.0)).collect()
+        };
+        // The upper and the lower quartile of the green/blue ratio, at mid brightness.
+        let (warm, cool) = (out([0.0, 0.89 * 0.4, 0.4]), out([0.0, 0.72 * 0.4, 0.4]));
+        assert!(warm[0] / warm[1] < 1.2, "greenest part too orange: {warm:?}");
+        assert!(cool[0] / cool[1] > 0.7, "bluest part lost its red: {cool:?}");
     }
 
     /// Red is weak but present everywhere (shallow to medium depth): the
