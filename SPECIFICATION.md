@@ -693,6 +693,9 @@ Status on 2026-11-24:
 - M1: done for the available reference images (§6.5). The shader matches the
   CPU reference exactly in a software-rendered browser; real GPUs still to
   be checked through the in-app self-test.
+- First run of the app on a real phone (2026-11-24, iPhone, iOS 18.7): the
+  owner reports that the video preview works and the export of a 4K H.264
+  clip was fast. No figures, self-test result or exported file yet.
 - M2: first version live: open or drop a photo, automatic correction, six
   manual controls with reset, split view, hold for original, neutral picker.
   Missing: zoom and pan.
