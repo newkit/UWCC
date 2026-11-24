@@ -204,10 +204,12 @@ pub struct Adjustments {
     pub saturation: f32,
     /// Channel gains from the neutral picker (`reference::neutral_gains`); 1 = none.
     pub neutral: [f32; 3],
+    /// -1 .. 1. Saturation that acts on muted colours and leaves strong ones nearly alone.
+    pub vibrance: f32,
 }
 
 /// Number of values in the flat form of [`Adjustments`].
-pub const ADJUSTMENTS_LEN: usize = 9;
+pub const ADJUSTMENTS_LEN: usize = 10;
 
 impl Default for Adjustments {
     fn default() -> Self {
@@ -219,12 +221,13 @@ impl Default for Adjustments {
             contrast: 0.0,
             saturation: 0.0,
             neutral: [1.0; 3],
+            vibrance: 0.0,
         }
     }
 }
 
 impl Adjustments {
-    /// Order: strength, temperature, tint, exposure, contrast, saturation, neutral gains (3).
+    /// Order: strength, temperature, tint, exposure, contrast, saturation, neutral gains (3), vibrance.
     /// `a` must hold [`ADJUSTMENTS_LEN`] values.
     pub fn from_array(a: &[f32]) -> Adjustments {
         Adjustments {
@@ -235,6 +238,7 @@ impl Adjustments {
             contrast: a[4],
             saturation: a[5],
             neutral: [a[6], a[7], a[8]],
+            vibrance: a[9],
         }
     }
 }

@@ -1,7 +1,7 @@
 // User settings, stored on this device only.
 
 import { useCallback, useState } from 'react';
-import { ALGORITHMS, type Algorithm, DEFAULT_ALGORITHM } from '../model';
+import { ALGORITHMS, type Algorithm, COLOR_MODES, type ColorMode, DEFAULT_ALGORITHM, DEFAULT_COLOR_MODE } from '../model';
 
 export type OutputMode = 'next' | 'overwrite';
 
@@ -16,9 +16,11 @@ export type Settings = {
   skipProcessed: boolean;
   /** The correction method files start with when they are added. */
   defaultAlgorithm: Algorithm;
+  /** The colour mode files start with when they are added. */
+  defaultColorMode: ColorMode;
 };
 
-export const DEFAULT_SETTINGS: Settings = { outputMode: 'next', suffix: '_uwcc', jpegQuality: 92, skipProcessed: true, defaultAlgorithm: DEFAULT_ALGORITHM };
+export const DEFAULT_SETTINGS: Settings = { outputMode: 'next', suffix: '_uwcc', jpegQuality: 92, skipProcessed: true, defaultAlgorithm: DEFAULT_ALGORITHM, defaultColorMode: DEFAULT_COLOR_MODE };
 
 const KEY = 'uwcc-settings';
 
@@ -35,6 +37,7 @@ function sanitize(raw: Partial<Settings>): Settings {
     jpegQuality: Math.min(100, Math.max(60, Math.round(Number(raw.jpegQuality) || DEFAULT_SETTINGS.jpegQuality))),
     skipProcessed: raw.skipProcessed !== false,
     defaultAlgorithm: ALGORITHMS.find((a) => a.id === raw.defaultAlgorithm)?.id ?? DEFAULT_ALGORITHM,
+    defaultColorMode: COLOR_MODES.find((m) => m.id === raw.defaultColorMode)?.id ?? DEFAULT_COLOR_MODE,
   };
 }
 

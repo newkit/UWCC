@@ -37,6 +37,7 @@ uniform vec3 u_whiteBalance; // channel gains
 uniform float u_exposure;    // multiplier
 uniform float u_contrast;    // multiplier around mid grey
 uniform float u_saturation;  // -1 .. 1
+uniform float u_vibrance;    // -1 .. 1: saturation for muted colours
 uniform float u_split;       // show the original left of this x (0..1); negative = off
 
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
@@ -113,6 +114,7 @@ void main() {
   vec3 s = toSrgb(v * u_whiteBalance * u_exposure);
   s = (s - 0.5) * u_contrast + 0.5;
   float luma = dot(s, LUMA);
-  s = clamp(luma + (s - luma) * (1.0 + u_saturation), 0.0, 1.0);
+  float spread = clamp(max(s.r, max(s.g, s.b)) - min(s.r, min(s.g, s.b)), 0.0, 1.0);
+  s = clamp(luma + (s - luma) * (1.0 + u_saturation) * (1.0 + u_vibrance * (1.0 - spread)), 0.0, 1.0);
   o_color = vec4(s, 1.0);
 }`;

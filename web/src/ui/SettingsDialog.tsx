@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { fsAccess } from '../io/sources';
-import { ALGORITHMS, type Algorithm } from '../model';
+import { ALGORITHMS, type Algorithm, COLOR_MODES, type ColorMode } from '../model';
 import { cleanSuffix, type Settings } from '../settings/settings';
 
 type Props = { open: boolean; settings: Settings; onChange: (next: Settings) => void; onClose: () => void };
@@ -71,6 +71,14 @@ export function SettingsDialog({ open, settings, onChange, onClose }: Props) {
             {ALGORITHMS.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
           </select>
           <small>Applies to files added from now on. The method can still be changed for each file in the editor.</small>
+        </label>
+
+        <label className="field">
+          <span>Colour mode for new files</span>
+          <select value={settings.defaultColorMode} onChange={(e) => onChange({ ...settings, defaultColorMode: e.target.value as ColorMode })}>
+            {COLOR_MODES.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+          </select>
+          <small>A colour mode is a starting position of the sliders. Applies to files added from now on; each file can still be changed in the editor.</small>
         </label>
 
         <label className="choice">

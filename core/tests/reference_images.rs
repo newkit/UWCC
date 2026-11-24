@@ -97,6 +97,22 @@ fn bannerfish_is_lifted_by_the_tone_curve() {
     assert!(median(&out) > median(&before) + 15, "median green {} -> {}", median(&before), median(&out));
 }
 
+/// The target of this pair has more contrast and colour than the automatic
+/// result; the "Vivid" colour mode (`COLOR_MODES` in `web/src/model.ts`) must
+/// bring the result closer to it.
+#[test]
+fn bannerfish_is_closer_with_the_vivid_look() {
+    let (before, natural, analysis) = corrected("bannerfish_before.jpg");
+    let (target, _, _) = load("bannerfish_after.jpg");
+    let vivid = Adjustments { contrast: 0.2, saturation: 0.1, vibrance: 0.35, ..Default::default() };
+    let mut out = before.clone();
+    apply_rgba8(&mut out, WIDTH as usize, &analysis.correction, &vivid, None);
+    let mean = |e: [f32; 3]| (e[0] + e[1] + e[2]) / 3.0;
+    let (plain, with_look) = (mean(rmse(&natural, &target)), mean(rmse(&out, &target)));
+    println!("bannerfish: natural {plain:.4} vivid {with_look:.4}");
+    assert!(with_look < plain - 0.01, "vivid {with_look:.4} should be closer than natural {plain:.4}");
+}
+
 /// Open water must stay blue: the correction must not balance the whole frame to grey.
 #[test]
 fn coral_water_stays_blue() {

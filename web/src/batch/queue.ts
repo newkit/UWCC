@@ -6,7 +6,7 @@ import { loadAnalysisCopy, resizedPixels } from '../io/importPhoto';
 import { isTaggedJpeg } from '../io/jpegMarker';
 import { deliver, isProcessedName, type WriteResult } from '../io/output';
 import type { Source } from '../io/sources';
-import { type Adjustments, type Algorithm, type Analyses, type Analysis, CONTROLS, DEFAULT_ADJUSTMENTS, DEFAULT_ALGORITHM, packParams, usesDepthModel } from '../model';
+import { type Adjustments, type Algorithm, type Analyses, type Analysis, CONTROLS, DEFAULT_ADJUSTMENTS, DEFAULT_ALGORITHM, packParams, usesDepthModel, withColorMode } from '../model';
 import type { Settings } from '../settings/settings';
 import type { VideoMeta } from '../video/video';
 import { analyze, analyzeWithRange, applyReference, mapsFromPixels } from '../worker/client';
@@ -49,7 +49,7 @@ export type Job = {
 let nextId = 1;
 
 export function createJob(source: Source, settings: Settings): Job {
-  const job: Job = { id: nextId++, source, status: 'analyzing', algorithm: settings.defaultAlgorithm, adjustments: DEFAULT_ADJUSTMENTS };
+  const job: Job = { id: nextId++, source, status: 'analyzing', algorithm: settings.defaultAlgorithm, adjustments: withColorMode(DEFAULT_ADJUSTMENTS, settings.defaultColorMode) };
   if (source.kind === 'other') return { ...job, status: 'unsupported', message: 'Not a photo or video.' };
   if (settings.skipProcessed && isProcessedName(source.name, settings.suffix)) {
     return { ...job, status: 'skipped', message: 'Already corrected by UWCC.' };
@@ -120,10 +120,11 @@ function toDataUrl(pixels: Uint8Array, width: number, height: number): string {
   return canvas.toDataURL('image/jpeg', 0.9);
 }
 
-/** Automatic analysis plus a thumbnail corrected by the given method. */
+/** Automatic analysis plus a thumbnail corrected by the given method and adjustments. */
 export async function prepare(
   source: Source,
   algorithm: Algorithm,
+  adjustments: Adjustments,
 ): Promise<Pick<Job, 'analysis' | 'video' | 'thumbSource' | 'thumb' | 'thumbKey' | 'width' | 'height'>> {
   let found: Pick<Job, 'analysis' | 'video' | 'thumbSource' | 'width' | 'height'>;
   if (source.kind === 'video') {
@@ -138,7 +139,7 @@ export async function prepare(
     };
   }
   // A method that waits for the depth model gets its thumbnail when that is done; until then the default method's.
-  const shown = { algorithm: found.video || found.analysis?.[algorithm] ? algorithm : DEFAULT_ALGORITHM, adjustments: DEFAULT_ADJUSTMENTS };
+  const shown = { algorithm: found.video || found.analysis?.[algorithm] ? algorithm : DEFAULT_ALGORITHM, adjustments };
   return { ...found, thumb: await renderThumb({ ...found, ...shown }), thumbKey: thumbKey(shown) };
 }
 

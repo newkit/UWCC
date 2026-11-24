@@ -85,7 +85,7 @@ export function App() {
             patch(job.id, { status: 'skipped', message: 'Already corrected by UWCC.' });
             return;
           }
-          patch(job.id, { ...(await prepare(job.source, job.algorithm)), status: 'ready' });
+          patch(job.id, { ...(await prepare(job.source, job.algorithm, job.adjustments)), status: 'ready' });
         } catch (e) {
           patch(job.id, { status: 'unsupported', message: text(e) });
         }

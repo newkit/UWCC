@@ -50,7 +50,7 @@ photo or video editor.
 | F3 | Respect EXIF orientation (photos) and rotation metadata (videos). |
 | F4 | Auto-correct runs on import and yields a parameter set, not baked pixels, so every edit stays non-destructive. |
 | F5 | For video, auto-correct samples a frame every 1-2 seconds and yields a smoothed, interpolated series of parameter sets, so the correction follows depth and light changes without flicker. |
-| F6 | Manual controls: correction strength, temperature, tint, exposure, contrast, saturation; reset per control and reset all. |
+| F6 | Manual controls: correction strength, temperature, tint, exposure, contrast, saturation, vibrance; reset per control and reset all. Colour modes (Natural, Vivid, Deep, Soft, Warm, Cool, Black & white) set those sliders to named positions (§6.4). |
 | F7 | Neutral picker: tap something that should be white/grey to set white balance (on the current frame for video). |
 | F8 | Before/after: press-and-hold for the original, plus a draggable split view. |
 | F9 | Video preview: play, pause, scrub, with the correction applied live. |
@@ -231,7 +231,7 @@ Dependencies must be checked for licence compatibility before they are added.
 1. red compensation (strength, and the mix of green and blue it borrows from),
 2. a 3x3 colour matrix plus offset (white balance and channel mixing),
 3. per-channel black and white points,
-4. the manual adjustments (temperature, tint, exposure, contrast, saturation),
+4. the manual adjustments (temperature, tint, exposure, contrast, saturation, vibrance),
 5. a global `strength` blending original and corrected.
 
 This covers the matrix method and the Ancuti-style compensation with the same
@@ -257,6 +257,19 @@ export tiles, video preview and video export.
 
 **Reference implementation.** The same maths in Rust on a pixel buffer; the
 ground truth for tests.
+
+**Colour modes.** A colour mode is a named position of the look sliders
+(temperature, tint, exposure, contrast, saturation, vibrance) and nothing
+else: `COLOR_MODES` in `web/src/model.ts`. Choosing a mode moves the
+sliders; the mode shown for a file is read back from where its sliders
+stand, and reads "Custom" once one of them is moved. Correction strength and
+the neutral point are not part of a mode. "Natural" leaves all sliders at
+zero and is the default; the mode new files start with is a setting. The
+modes are a matter of taste, not of measurement, with one exception: the
+"Vivid" values were chosen where they bring the bannerfish pair closest to
+its target (§6.5). Vibrance is saturation scaled by how colourless a pixel
+is (one minus the spread of its encoded channels), so muted colours gain
+and strong ones are hardly moved.
 
 ### 6.5 Findings from the owner's reference pairs
 
@@ -362,6 +375,18 @@ pairs are bright enough to get little or no lift: turtle and dolphins are
 unchanged, coral moved from 0.047 to 0.050 because its dark open water is
 lifted slightly. What remains on the bannerfish pair: the target has deeper
 blacks, more contrast and a more saturated blue than the pipeline produces.
+
+That remainder was looked at for an automatic rule and none was found that
+holds on all four pairs. Fitting contrast and saturation on top of the
+automatic result per pair gives: turtle and coral want slightly less
+saturation, dolphins slightly more, bannerfish much more (contrast +20 %,
+saturation +45 %). Applying the tone curve to luminance or to the brightest
+channel instead of per channel, and measuring the water colour on brighter
+pixels only, moved the bannerfish error by less than 0.01 and made other
+pairs worse. Contrast and colourfulness are therefore left to the user as
+colour modes (§6.4): with "Vivid" the bannerfish error falls from 0.095 to
+0.079, while the same mode moves turtle to 0.045 and coral to 0.085. The
+violet cast of that photo's water in UWCC's result is not addressed.
 
 The split into depletion and cast came from the first real video clip from
 the owner (a reef seen from above, red at about a third of green, kept in
@@ -730,6 +755,8 @@ Status on 2026-11-24:
 - First run of the app on a real phone (2026-11-24, iPhone, iOS 18.7): the
   owner reports that the video preview works and the export of a 4K H.264
   clip was fast. No figures, self-test result or exported file yet.
+- Colour modes and a vibrance slider were added on 2026-11-24 (F6, §6.4);
+  checked in headless Chromium only.
 - M2: first version live: open or drop a photo, automatic correction, six
   manual controls with reset, split view, hold for original, neutral picker.
   Missing: zoom and pan.

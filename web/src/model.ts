@@ -8,6 +8,8 @@ export type Adjustments = {
   exposure: number;
   contrast: number;
   saturation: number;
+  /** Saturation that acts on muted colours and leaves strong ones nearly alone. */
+  vibrance: number;
   /** Channel gains set by the neutral picker; [1, 1, 1] = none. */
   neutral: [number, number, number];
 };
@@ -19,7 +21,7 @@ export const NO_NEUTRAL: [number, number, number] = [1, 1, 1];
 export const hasNeutral = (a: Adjustments) => a.neutral.some((g) => g !== 1);
 
 export const DEFAULT_ADJUSTMENTS: Adjustments = {
-  strength: 1, temperature: 0, tint: 0, exposure: 0, contrast: 0, saturation: 0, neutral: NO_NEUTRAL,
+  strength: 1, temperature: 0, tint: 0, exposure: 0, contrast: 0, saturation: 0, vibrance: 0, neutral: NO_NEUTRAL,
 };
 
 export type ControlSpec = { key: SliderKey; label: string; min: number; max: number; step: number; format: (v: number) => string };
@@ -33,7 +35,44 @@ export const CONTROLS: ControlSpec[] = [
   { key: 'exposure', label: 'Exposure', min: -2, max: 2, step: 0.02, format: (v) => signed(v, 2, ' EV') },
   { key: 'contrast', label: 'Contrast', min: -1, max: 1, step: 0.01, format: (v) => signed(v, 0, '%') },
   { key: 'saturation', label: 'Saturation', min: -1, max: 1, step: 0.01, format: (v) => signed(v, 0, '%') },
+  { key: 'vibrance', label: 'Vibrance', min: -1, max: 1, step: 0.01, format: (v) => signed(v, 0, '%') },
 ];
+
+/** The sliders a colour mode sets. The strength of the correction and the neutral point are not part of a look. */
+const LOOK_KEYS = ['temperature', 'tint', 'exposure', 'contrast', 'saturation', 'vibrance'] as const satisfies readonly SliderKey[];
+type Look = Partial<Record<(typeof LOOK_KEYS)[number], number>>;
+
+/**
+ * Colour modes: named positions of the look sliders, nothing more. Choosing
+ * one moves the sliders; a file's mode is read back from where its sliders
+ * stand, so there is no second state to keep in step with them.
+ */
+export const COLOR_MODES = [
+  { id: 'natural', label: 'Natural', look: {} },
+  { id: 'vivid', label: 'Vivid', look: { contrast: 0.2, saturation: 0.1, vibrance: 0.35 } },
+  { id: 'deep', label: 'Deep', look: { exposure: -0.14, contrast: 0.35, vibrance: 0.2 } },
+  { id: 'soft', label: 'Soft', look: { contrast: -0.15, saturation: -0.1 } },
+  { id: 'warm', label: 'Warm', look: { temperature: 0.25, vibrance: 0.15 } },
+  { id: 'cool', label: 'Cool', look: { temperature: -0.25, vibrance: 0.15 } },
+  { id: 'mono', label: 'Black & white', look: { contrast: 0.15, saturation: -1 } },
+] as const satisfies readonly { id: string; label: string; look: Look }[];
+
+export type ColorMode = (typeof COLOR_MODES)[number]['id'];
+export const DEFAULT_COLOR_MODE: ColorMode = 'natural';
+
+/** The adjustments with the look sliders at the positions of the given mode. */
+export function withColorMode(a: Adjustments, mode: ColorMode): Adjustments {
+  const look: Look = COLOR_MODES.find((m) => m.id === mode)?.look ?? {};
+  const next = { ...a };
+  for (const key of LOOK_KEYS) next[key] = look[key] ?? 0;
+  return next;
+}
+
+/** The mode whose slider positions the adjustments have; `null` when the sliders were moved away from every mode. */
+export function colorModeOf(a: Adjustments): ColorMode | null {
+  const match = COLOR_MODES.find((m) => LOOK_KEYS.every((key) => a[key] === ((m.look as Look)[key] ?? 0)));
+  return match?.id ?? null;
+}
 
 /** The selectable correction methods. `core` is the id the WASM core knows the method by. */
 export const ALGORITHMS = [
@@ -123,13 +162,13 @@ export function analysisFromArray(a: Float32Array): Analysis {
 }
 
 /** Number of values the adjustments take in the flat form (`ADJUSTMENTS_LEN` in the core). */
-export const ADJUSTMENTS_LEN = 9;
+export const ADJUSTMENTS_LEN = 10;
 
 /** Flat parameter block for the core's reference implementation: correction + adjustments. */
 export function packParams(correction: Float32Array, a: Adjustments): Float32Array {
   const p = new Float32Array(CORRECTION_LEN + ADJUSTMENTS_LEN);
   p.set(correction.subarray(0, CORRECTION_LEN));
-  p.set([a.strength, a.temperature, a.tint, a.exposure, a.contrast, a.saturation, ...a.neutral], CORRECTION_LEN);
+  p.set([a.strength, a.temperature, a.tint, a.exposure, a.contrast, a.saturation, ...a.neutral, a.vibrance], CORRECTION_LEN);
   return p;
 }
 

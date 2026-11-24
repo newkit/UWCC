@@ -59,7 +59,7 @@ export async function selfTest(): Promise<SelfTestResult> {
     // Covers dark and bright values, with red mostly low as in underwater footage.
     source.set([(x * y) % 256 >> 2, (x * 4 + y) % 256, (y * 4 + x * 3) % 256, 255], i * 4);
   }
-  const adjustments: Adjustments = { strength: 0.9, temperature: 0.2, tint: -0.1, exposure: 0.3, contrast: 0.15, saturation: 0.2, neutral: [1.3, 0.9, 0.8] };
+  const adjustments: Adjustments = { strength: 0.9, temperature: 0.2, tint: -0.1, exposure: 0.3, contrast: 0.15, saturation: 0.2, vibrance: 0.3, neutral: [1.3, 0.9, 0.8] };
 
   const renderer = new CorrectionRenderer(createWorkCanvas(size, size));
   renderer.setSource(new ImageData(source, size, size), size, size);

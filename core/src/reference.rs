@@ -147,14 +147,18 @@ pub fn apply_pixel_at(srgb: [f32; 3], c: &Correction, a: &Adjustments, local: &L
         s[ch] = linear_to_srgb(v[ch] * g[ch] * ev);
     }
 
-    // 4. Contrast around mid grey, 5. saturation, both on encoded values.
+    // 4. Contrast around mid grey, 5. saturation and vibrance, all on encoded values.
+    // Vibrance scales the distance from grey by how colourless the pixel is
+    // (1 - the spread of its channels), so strong colours are hardly moved.
     let k = a.contrast.exp2();
     for x in s.iter_mut() {
         *x = (*x - 0.5) * k + 0.5;
     }
     let luma = LUMA[0] * s[0] + LUMA[1] * s[1] + LUMA[2] * s[2];
+    let spread = (s[0].max(s[1]).max(s[2]) - s[0].min(s[1]).min(s[2])).clamp(0.0, 1.0);
+    let factor = (1.0 + a.saturation) * (1.0 + a.vibrance * (1.0 - spread));
     for x in s.iter_mut() {
-        *x = (luma + (*x - luma) * (1.0 + a.saturation)).clamp(0.0, 1.0);
+        *x = (luma + (*x - luma) * factor).clamp(0.0, 1.0);
     }
     s
 }
@@ -303,6 +307,19 @@ mod tests {
         let a = Adjustments { temperature: 1.0, ..Default::default() };
         let out = apply_pixel([0.5, 0.5, 0.5], &Correction::IDENTITY, &a, 0.0);
         assert!(out[0] > 0.5 && out[2] < 0.5);
+    }
+
+    #[test]
+    fn vibrance_moves_muted_colours_more_than_strong_ones() {
+        let a = Adjustments { vibrance: 0.5, ..Default::default() };
+        let spread = |p: [f32; 3]| p[0].max(p[1]).max(p[2]) - p[0].min(p[1]).min(p[2]);
+        let gain = |p: [f32; 3]| spread(apply_pixel(p, &Correction::IDENTITY, &a, 0.0)) / spread(p);
+        let (muted, strong) = (gain([0.5, 0.45, 0.4]), gain([0.7, 0.3, 0.2]));
+        assert!(muted > 1.4, "muted colour gained {muted}");
+        assert!(strong > 1.0 && strong < muted - 0.15, "strong colour gained {strong}, muted {muted}");
+        // Grey stays grey.
+        let grey = apply_pixel([0.4; 3], &Correction::IDENTITY, &a, 0.0);
+        assert!((grey[0] - 0.4).abs() < 1e-5 && (grey[0] - grey[2]).abs() < 1e-6);
     }
 
     #[test]

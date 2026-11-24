@@ -44,7 +44,7 @@ export class CorrectionRenderer {
     for (const name of [
       'u_tex', 'u_encoded', 'u_comp', 'u_ranged', 'u_backscatter', 'u_logGain', 'u_range', 'u_rangeSize', 'u_rangeRect',
       'u_fusion', 'u_gamma', 'u_tone', 'u_sharpen', 'u_fusionA', 'u_fusionB', 'u_fusionSize',
-      'u_matrix', 'u_offset', 'u_strength', 'u_whiteBalance', 'u_exposure', 'u_contrast', 'u_saturation', 'u_split',
+      'u_matrix', 'u_offset', 'u_strength', 'u_whiteBalance', 'u_exposure', 'u_contrast', 'u_saturation', 'u_vibrance', 'u_split',
     ]) {
       this.uniforms[name] = gl.getUniformLocation(program, name);
     }
@@ -161,6 +161,7 @@ export class CorrectionRenderer {
     gl.uniform1f(u.u_exposure, values.exposure);
     gl.uniform1f(u.u_contrast, values.contrast);
     gl.uniform1f(u.u_saturation, adjustments.saturation);
+    gl.uniform1f(u.u_vibrance, adjustments.vibrance);
     gl.uniform1f(u.u_split, split ?? -1);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
