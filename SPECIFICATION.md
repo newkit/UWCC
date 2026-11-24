@@ -679,8 +679,14 @@ Status on 2026-11-24:
     through the share sheet or a download; writing beside the source needs
     the native plugin (§7.4).
 
-  Still open for the gate: an Android phone, the tester's own camera clips
-  and photos on both platforms (10-bit HEVC, audio, long clips, memory), and
+  - One camera clip of the tester's (4K H.264 High, 25 frames/s,
+    88 Mbit/s, full range, PCM audio, QuickTime) went through at
+    23.8 frames/s (0.95 times real time); picture intact, audio kept. The
+    spike wrote H.264 Baseline at about 22 Mbit/s; which profile and bitrate
+    the app gets on iOS is not yet checked.
+
+  Still open for the gate: an Android phone, more of the tester's own
+  clips and photos on both platforms (10-bit HEVC, long clips, memory), and
   the same tests inside the Capacitor wrapper. Memory use could not be
   measured on iOS (the browser does not report it). The Capacitor wrapper
   and native file access are not started.
