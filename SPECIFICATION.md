@@ -659,10 +659,31 @@ Rules:
 | M7 | Polish | Performance targets met, accessibility, localisation scaffolding, icons, offline PWA |
 | M8 | Release | Web deployed; TestFlight and Play internal testing |
 
-Status on 2026-11-23:
+Status on 2026-11-24:
 
-- M0: test page published at `/spike/m0/`; waiting for reports from real
-  phones. The Capacitor wrapper and native file access are not started.
+- M0: test page published at `/spike/m0/`. First report received
+  (2026-11-24): iPhone, iOS 18.7, Firefox for iOS (which uses the system
+  WebKit engine, the same one a Capacitor app runs in), built-in tests only.
+  Everything passed:
+  - WebCodecs, WebGL2 (16384 px textures), WebAssembly, OffscreenCanvas and
+    OPFS are present. H.264, HEVC, VP9 and AV1 decode and H.264 and HEVC
+    encode up to 4K60 are reported as supported, with hardware.
+  - Decode → shader → encode → mux: 1080p at 66-78 frames/s (2.2-2.6 times
+    real time for 30 frames/s footage), 4K at 23 frames/s for H.264 and HEVC
+    (0.77 times real time) and 17 frames/s for VP9. Every output was
+    decodable.
+  - Photo: 12 MP in 2.0 s and 48 MP in 4.0 s (render plus JPEG encoding),
+    in 4 and 12 tiles.
+  - As expected, there are no file or folder pickers of the File System
+    Access API and no cross-origin isolation. Saving in the browser goes
+    through the share sheet or a download; writing beside the source needs
+    the native plugin (§7.4).
+
+  Still open for the gate: an Android phone, the tester's own camera clips
+  and photos on both platforms (10-bit HEVC, audio, long clips, memory), and
+  the same tests inside the Capacitor wrapper. Memory use could not be
+  measured on iOS (the browser does not report it). The Capacitor wrapper
+  and native file access are not started.
 - M1: done for the available reference images (§6.5). The shader matches the
   CPU reference exactly in a software-rendered browser; real GPUs still to
   be checked through the in-app self-test.
