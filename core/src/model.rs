@@ -43,7 +43,7 @@ impl Algorithm {
 pub const RANGE_NODES: usize = 8;
 
 /// Number of values in the flat form of a [`Correction`].
-pub const CORRECTION_LEN: usize = 23 + 6 * RANGE_NODES;
+pub const CORRECTION_LEN: usize = 24 + 6 * RANGE_NODES;
 
 /// Automatic correction: the parameters of the per-pixel pipeline in
 /// `reference`. Every method fills in the part it needs and leaves the rest
@@ -57,7 +57,9 @@ pub const CORRECTION_LEN: usize = 23 + 6 * RANGE_NODES;
 ///    in a map of the image: its range, or with `haze` the amount of haze over it;
 /// 4. the affine transform `m`, clamped at zero;
 /// 5. if `fusion`: blend a gamma-corrected and a sharpened version of the result, using
-///    weights and low-frequency parts from maps of the image (`fusion::FusionMaps`).
+///    weights and low-frequency parts from maps of the image (`fusion::FusionMaps`);
+/// 6. in linear light, the tone curve `x * tone / (1 + (tone - 1) * x)` per channel: it
+///    raises shadows and mid-tones by up to the factor `tone` and leaves white where it is.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Correction {
     /// `m[row]` is `[from_r, from_g, from_b, offset]` for the output channel `row`.
@@ -89,6 +91,11 @@ pub struct Correction {
     /// Step 5: the sharpened input stretches the detail `value - blur` as
     /// `(detail - sharpen[0]) * sharpen[1]`, clamped to 0..1.
     pub sharpen: [f32; 2],
+    /// Step 6: slope of the tone curve at black; 1 = no change.
+    ///
+    /// One number, not a table: the curves for two values blend into a curve
+    /// of the same family that lies between them, so interpolating it is safe.
+    pub tone: f32,
 }
 
 impl Correction {
@@ -109,6 +116,7 @@ impl Correction {
             fusion: false,
             gamma: 1.0,
             sharpen: [0.0, 1.0],
+            tone: 1.0,
         }
     }
 
@@ -119,7 +127,7 @@ impl Correction {
         table[i] + (table[i + 1] - table[i]) * (t - i as f32)
     }
 
-    /// Blend the affine part between identity (`t = 0`) and this correction (`t = 1`).
+    /// Blend the affine part and the tone curve between identity (`t = 0`) and this correction (`t = 1`).
     pub fn scaled(&self, t: f32) -> Correction {
         let mut out = *self;
         for r in 0..3 {
@@ -128,12 +136,13 @@ impl Correction {
                 out.m[r][c] = id + (self.m[r][c] - id) * t;
             }
         }
+        out.tone = 1.0 + (self.tone - 1.0) * t;
         out
     }
 
     /// Flat form: matrix (12, row-major), encoded flag, compensation (2),
     /// backscatter (3 x `RANGE_NODES`), log gain (3 x `RANGE_NODES`), ranged flag, haze flag, airlight (2),
-    /// fusion flag, gamma, sharpen (2).
+    /// fusion flag, gamma, sharpen (2), tone.
     pub fn to_array(&self) -> [f32; CORRECTION_LEN] {
         let mut a = [0.0; CORRECTION_LEN];
         for r in 0..3 {
@@ -151,6 +160,7 @@ impl Correction {
         a[tail + 4] = self.fusion as u8 as f32;
         a[tail + 5] = self.gamma;
         a[tail + 6..tail + 8].copy_from_slice(&self.sharpen);
+        a[tail + 8] = self.tone;
         a
     }
 
@@ -172,6 +182,7 @@ impl Correction {
         c.fusion = a[tail + 4] > 0.5;
         c.gamma = a[tail + 5];
         c.sharpen.copy_from_slice(&a[tail + 6..tail + 8]);
+        c.tone = a[tail + 8];
         c
     }
 }

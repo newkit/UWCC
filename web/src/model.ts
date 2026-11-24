@@ -63,14 +63,16 @@ export const RANGE_NODES = 8;
 /**
  * Number of values in a correction. The layout is that of `Correction::to_array` in the core:
  * matrix (12), encoded flag, compensation (2), backscatter and log-gain tables (3 x RANGE_NODES each), ranged flag,
- * haze flag, airlight (2), fusion flag, gamma, sharpen (2).
+ * haze flag, airlight (2), fusion flag, gamma, sharpen (2), tone.
  */
-export const CORRECTION_LEN = 23 + 6 * RANGE_NODES;
+export const CORRECTION_LEN = 24 + 6 * RANGE_NODES;
 
 /** Position of the ranged flag; the haze flag and the airlight follow it. */
 const RANGED_AT = 15 + 6 * RANGE_NODES;
 /** Position of the fusion flag; gamma and the two sharpen values follow it. */
 export const FUSION_AT = RANGED_AT + 4;
+/** Position of the tone value: slope of the tone curve at black, 1 = no change. */
+export const TONE_AT = FUSION_AT + 4;
 
 /**
  * Result of the automatic analysis. `correction` starts with a row-major 3x4
@@ -94,7 +96,7 @@ export type Analyses = Partial<Record<Algorithm, Analysis>>;
 
 export const IDENTITY_CORRECTION = new Float32Array(CORRECTION_LEN);
 IDENTITY_CORRECTION.set([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0]);
-IDENTITY_CORRECTION.set([1, 0, 1], FUSION_AT + 1); // gamma 1, sharpen (0, 1)
+IDENTITY_CORRECTION.set([1, 0, 1, 1], FUSION_AT + 1); // gamma 1, sharpen (0, 1), tone 1
 
 /** Does this correction read a map of the image (range or haze), so that drawing it needs one? */
 export const usesRange = (correction: Float32Array) => correction[RANGED_AT] > 0.5;

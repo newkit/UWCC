@@ -260,10 +260,11 @@ ground truth for tests.
 
 ### 6.5 Findings from the owner's reference pairs
 
-`testdata/photos/` holds three before/after pairs supplied by the owner
-(`dolphins_*`, `turtle_*`, `coral_*`; 1500x2000 and 2000x1500 JPEG) and one
-flash photo of the coral scene (`coral_flash.jpg`). The "after" images
-are the target look. Measured on them:
+`testdata/photos/` holds four before/after pairs supplied by the owner
+(`dolphins_*`, `turtle_*`, `coral_*`, and since 2026-11-24 `bannerfish_*`;
+1500x2000 and 2000x1500 JPEG) and one flash photo of the coral scene
+(`coral_flash.jpg`). The "after" images are the target look. Measured on
+the first three:
 
 - **Red is absent in the originals**: mean red is 0.3 % and 1.7 % of full
   scale (0.7 % in the coral pair). The corrected red is therefore built almost
@@ -341,18 +342,33 @@ file). In linear light, on a copy of about 256 px:
 5. Channel balance on scene content only: pixels are weighted by where their
    green/blue ratio lies between water and scene; open water gets weight 0.
 6. Common white level (scene highlights to 0.68 linear), gains capped at 8.
+7. Tone: if the median luminance of the result is below 0.09 (linear), the
+   tone curve of the pipeline (§6.7) lifts it to that level, by at most a
+   factor of 4 at black.
 
 Mean error against the targets, per channel RMS on 0..1 sRGB values, with the
 uncorrected original in brackets: turtle 0.021 (0.235), dolphins 0.035
-(0.299), coral 0.047 (0.236). The flash photo is left unchanged. These numbers
-are regression thresholds in `core/tests/reference_images.rs`.
+(0.299), coral 0.050 (0.236), bannerfish 0.095 (0.163). The flash photo is
+left unchanged. `core/tests/reference_images.rs` holds regression thresholds
+a little above these numbers.
+
+Step 7 came from the fourth pair (`bannerfish`: a reef mostly in shadow
+with a few sunlit rocks, red at about a fifth of green). Its highlights
+are already bright, so gains cannot brighten it; steps 1 to 6 alone made it
+darker than the original and further from the target than no correction at
+all (0.208). The target lifts shadows and mid-tones about threefold and
+keeps the highlights, which is what the tone curve does. The first three
+pairs are bright enough to get little or no lift: turtle and dolphins are
+unchanged, coral moved from 0.047 to 0.050 because its dark open water is
+lifted slightly. What remains on the bannerfish pair: the target has deeper
+blacks, more contrast and a more saturated blue than the pipeline produces.
 
 The split into depletion and cast came from the first real video clip from
 the owner (a reef seen from above, red at about a third of green, kept in
 the git-ignored `testdata/local/`). An earlier version scaled the whole
 correction by depletion and removed only a third of that clip's blue cast.
 With the cast measure the sand comes out neutral and the corals brown, while
-the three pairs and the flash photo are unaffected. There is no target image
+the first three pairs and the flash photo are unaffected. There is no target image
 for this clip; the result was judged by eye.
 
 The open-water measure came from the second clip from the owner (a reef
@@ -363,13 +379,13 @@ removed its red: the reef came out salmon-orange, sand and shadows
 blue-grey. The frame now counts as having open water as the share of
 water-weighted pixels (step 5) rises from 20 % to 45 %; below that the
 subtraction is reduced and the high red black point is not used. The clip
-comes out with beige reef and light grey sand; the three pairs give exactly
+comes out with beige reef and light grey sand; the first three pairs give exactly
 the same numbers as before. Limit: a subject that fills most of the frame
 in front of a little open water falls below that range, and its water then
 gets some red and turns greyer.
 
-Caveat: the constants were tuned on three pairs from similar deep-blue
-conditions plus those two clips. They are a starting point and will need
+Caveat: the constants were tuned on four pairs, three of them from similar
+deep-blue conditions, plus those two clips. They are a starting point and will need
 revisiting with green water and more shallow footage. When the automatic
 correction decides to apply nothing, the Correction slider cannot force it
 on; that override is not built yet.
@@ -396,8 +412,11 @@ The pipeline, per pixel: take the value encoded or in linear light; add red
 and blue in proportion to green (compensation); optionally subtract
 backscatter and multiply by an attenuation gain, both looked up by the
 pixel's range or haze; apply a 3x4 matrix; optionally blend a
-gamma-corrected and a sharpened version (fusion); then the manual
-adjustments as before.
+gamma-corrected and a sharpened version (fusion); in linear light, apply
+the tone curve `x * t / (1 + (t - 1) * x)` per channel, which raises
+shadows and mid-tones by up to the factor `t` and leaves white at white
+(`t` = 1: no change; so far only UWCC's own method sets it); then the
+manual adjustments as before.
 
 | Method | Source | What is implemented | What is not |
 |--------|--------|---------------------|-------------|

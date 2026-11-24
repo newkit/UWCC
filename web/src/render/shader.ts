@@ -24,7 +24,8 @@ uniform highp sampler2D u_range; // range map, one float per cell, 0 near .. 1 f
 uniform vec2 u_rangeSize;    // its size in cells
 uniform vec4 u_rangeRect;    // the part of the whole image this draw covers: x, y, width, height (0..1)
 uniform float u_fusion;      // 1 = fusion step is active
-uniform float u_gamma;       // exponent of the gamma-corrected input
+uniform float u_gamma;      // exponent of the gamma-corrected input
+uniform float u_tone;       // slope of the tone curve at black; 1 = none
 uniform vec2 u_sharpen;      // shift and scale of the sharpened input's detail
 uniform highp sampler2D u_fusionA; // fusion maps: offset (rgb) and weight of the first input (a)
 uniform highp sampler2D u_fusionB; // fusion maps: blurred balanced image (rgb)
@@ -106,6 +107,8 @@ void main() {
     corrected = max(a.a * first + (1.0 - a.a) * second + a.rgb, 0.0);
   }
   if (u_encoded > 0.5) corrected = toLinear(min(corrected, 1.0));
+  // Tone curve: lifts shadows and mid-tones, keeps white; as tone_curve in the core's reference.
+  corrected = corrected * u_tone / (1.0 + (u_tone - 1.0) * corrected);
   vec3 v = mix(lin, corrected, u_strength);
   vec3 s = toSrgb(v * u_whiteBalance * u_exposure);
   s = (s - 0.5) * u_contrast + 0.5;

@@ -21,8 +21,12 @@
 //! 5. Balance the channels on scene content only; open water is excluded so
 //!    that a frame full of blue does not turn the reef yellow.
 //! 6. Scale to a common white level, with a cap on the gains to limit noise.
+//! 7. Where the result is dark although its highlights are already at the
+//!    white level (a frame of shadow with a few lit parts), raise shadows
+//!    and mid-tones with the tone curve of the pipeline; gains cannot do
+//!    that without clipping the highlights.
 
-use crate::color::srgb_to_linear;
+use crate::color::{srgb_to_linear, LUMA};
 use crate::model::Correction;
 
 /// Red needs no rebuilding when mean red reaches this share of mean green.
@@ -59,6 +63,10 @@ const WHITE_PERCENTILE: f32 = 99.5;
 const WHITE_LEVEL: f32 = 0.68;
 /// Upper bound on any channel gain; trades brightness for less amplified noise.
 const MAX_GAIN: f32 = 8.0;
+/// A result whose median luminance (linear) is below this is lifted to it by the tone curve.
+const TONE_MEDIAN: f32 = 0.09;
+/// Upper bound on the tone value: the factor by which shadows, and their noise, are raised.
+const MAX_TONE: f32 = 4.0;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Analysis {
@@ -230,6 +238,21 @@ fn analyze_with(px: &[[f32; 3]], always: bool) -> Analysis {
         [0.0, gain[1], 0.0, -lo[1] * gain[1]],
         [0.0, 0.0, gain[2], -lo[2] * gain[2]],
     ]);
+    let mut full = full;
+    // 7. Tone: where the result is dark, lift it until the median reaches the target.
+    let luma: Vec<f32> = px
+        .iter()
+        .map(|p| {
+            let v = [0, 1, 2].map(|ch| {
+                let m = &full.m[ch];
+                (m[0] * p[0] + m[1] * p[1] + m[2] * p[2] + m[3]).clamp(0.0, 1.0)
+            });
+            LUMA[0] * v[0] + LUMA[1] * v[1] + LUMA[2] * v[2]
+        })
+        .collect();
+    let median = percentile(&luma, 50.0).max(1e-4);
+    // The tone value that maps `median` to the target, from inverting the curve.
+    full.tone = (TONE_MEDIAN * (1.0 - median) / (median * (1.0 - TONE_MEDIAN))).clamp(1.0, MAX_TONE);
     Analysis { correction: full.scaled(strength), depletion, strength, scene_fraction, water_ratio }
 }
 
@@ -381,6 +404,31 @@ mod tests {
         let a = analyze_linear(&px);
         assert_eq!(a.strength, 0.0);
         assert_eq!(a.correction, Correction::IDENTITY);
+    }
+
+    /// Mostly shadow with a few bright parts: gains cannot brighten it, the tone curve must.
+    #[test]
+    fn dark_frame_with_highlights_gets_a_tone_lift() {
+        let mut px: Vec<[f32; 3]> = (0..3000)
+            .map(|i| {
+                let v = 0.005 + 0.03 * i as f32 / 3000.0;
+                [0.3 * v, v, v * (2.0 - 0.8 * i as f32 / 3000.0)]
+            })
+            .collect();
+        px.extend((0..300).map(|i| {
+            let v = 0.5 + 0.4 * i as f32 / 300.0;
+            [0.3 * v, v, 1.1 * v]
+        }));
+        let a = analyze_linear(&px);
+        assert!(a.correction.tone > 1.5 && a.correction.tone <= MAX_TONE, "tone {}", a.correction.tone);
+        // A frame that is bright enough gets none.
+        let bright: Vec<[f32; 3]> = (0..3000)
+            .map(|i| {
+                let v = 0.1 + 0.6 * i as f32 / 3000.0;
+                [0.3 * v, v, v * (1.6 - 0.5 * i as f32 / 3000.0)]
+            })
+            .collect();
+        assert_eq!(analyze_linear(&bright).correction.tone, 1.0);
     }
 
     #[test]

@@ -40,7 +40,7 @@ fn corrected(name: &str) -> (Vec<u8>, Vec<u8>, uwcc_core::Analysis) {
     (before, out, analysis)
 }
 
-fn check_pair(name: &str, max_mean_rmse: f32) {
+fn check_pair(name: &str, max_mean_rmse: f32, min_depletion: f32, max_remaining: f32) {
     let (before, out, analysis) = corrected(&format!("{name}_before.jpg"));
     let (target, _, _) = load(&format!("{name}_after.jpg"));
     let e = rmse(&out, &target);
@@ -51,25 +51,50 @@ fn check_pair(name: &str, max_mean_rmse: f32) {
         "{name}: rmse {e:?} mean {mean:.4} (uncorrected {mean_untouched:.4}) depletion {:.2} scene {:.2}",
         analysis.depletion, analysis.scene_fraction
     );
-    assert!(analysis.depletion > 0.9, "{name}: red should be detected as depleted");
+    assert!(analysis.depletion > min_depletion, "{name}: red should be detected as depleted");
     assert_eq!(analysis.strength, 1.0, "{name}: the full correction should apply");
     assert!(mean < max_mean_rmse, "{name}: mean rmse {mean:.4} exceeds {max_mean_rmse}");
-    assert!(mean < 0.35 * mean_untouched, "{name}: correction should remove most of the difference to the target");
+    assert!(
+        mean < max_remaining * mean_untouched,
+        "{name}: correction should remove most of the difference to the target"
+    );
 }
 
 #[test]
 fn turtle_matches_target() {
-    check_pair("turtle", 0.035);
+    check_pair("turtle", 0.035, 0.9, 0.35);
 }
 
 #[test]
 fn dolphins_match_target() {
-    check_pair("dolphins", 0.05);
+    check_pair("dolphins", 0.05, 0.9, 0.35);
 }
 
 #[test]
 fn coral_matches_target() {
-    check_pair("coral", 0.065);
+    check_pair("coral", 0.065, 0.9, 0.35);
+}
+
+/// A frame of shadow with a few sunlit parts and some red left. The target
+/// is brighter and has more contrast than the pipeline reaches, so the
+/// thresholds are wider than for the other pairs.
+#[test]
+fn bannerfish_approaches_target() {
+    check_pair("bannerfish", 0.105, 0.5, 0.75);
+}
+
+/// The same frame must come out brighter than it went in: its highlights are
+/// already bright, so only the tone curve can lift it.
+#[test]
+fn bannerfish_is_lifted_by_the_tone_curve() {
+    let (before, out, analysis) = corrected("bannerfish_before.jpg");
+    assert!(analysis.correction.tone > 2.0, "tone {}", analysis.correction.tone);
+    let median = |buf: &[u8]| {
+        let mut green: Vec<u8> = buf.as_chunks::<4>().0.iter().map(|p| p[1]).collect();
+        green.sort_unstable();
+        green[green.len() / 2]
+    };
+    assert!(median(&out) > median(&before) + 15, "median green {} -> {}", median(&before), median(&out));
 }
 
 /// Open water must stay blue: the correction must not balance the whole frame to grey.
@@ -104,7 +129,9 @@ fn flash_photo_is_left_alone() {
 #[test]
 fn every_method_gives_a_sane_result() {
     use uwcc_core::{analyze, Algorithm, RangeMap};
-    for name in ["turtle_before.jpg", "dolphins_before.jpg", "coral_before.jpg", "coral_flash.jpg"] {
+    for name in
+        ["turtle_before.jpg", "dolphins_before.jpg", "coral_before.jpg", "coral_flash.jpg", "bannerfish_before.jpg"]
+    {
         let (before, w, h) = load(name);
         for algorithm in Algorithm::ALL {
             let analysis = analyze(algorithm, &before, w as usize, h as usize);

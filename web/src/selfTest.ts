@@ -2,7 +2,7 @@
 // once for every branch of the per-pixel pipeline.
 // Exposed for automated checks: `await window.uwccSelfTest()`.
 
-import { type Adjustments, CORRECTION_LEN, FUSION_AT, RANGE_NODES, packParams } from './model';
+import { type Adjustments, CORRECTION_LEN, FUSION_AT, RANGE_NODES, TONE_AT, packParams } from './model';
 
 /** Position of the ranged flag in a correction; the haze flag and the airlight follow. */
 const RANGED_AT = 15 + 6 * RANGE_NODES;
@@ -11,7 +11,7 @@ import { applyReference, mapsFromPixels } from './worker/client';
 
 export type SelfTestResult = { maxDiff: number; meanDiff: number; pixels: number; cases: Record<string, number> };
 
-function correction(matrix: number[], rest: { encoded?: boolean; comp?: number[]; backscatter?: number[]; logGain?: number[]; airlight?: number[]; fusion?: number[] } = {}): Float32Array {
+function correction(matrix: number[], rest: { encoded?: boolean; comp?: number[]; backscatter?: number[]; logGain?: number[]; airlight?: number[]; fusion?: number[]; tone?: number } = {}): Float32Array {
   const c = new Float32Array(CORRECTION_LEN);
   c.set(matrix);
   c[12] = rest.encoded ? 1 : 0;
@@ -24,12 +24,15 @@ function correction(matrix: number[], rest: { encoded?: boolean; comp?: number[]
   }
   // Fusion flag, gamma, sharpen shift and scale; neutral values when the step is off.
   c.set(rest.fusion ? [1, ...rest.fusion] : [0, 1, 0, 1], FUSION_AT);
+  c[TONE_AT] = rest.tone ?? 1;
   return c;
 }
 
 /** Made-up parameters of the size each method produces. */
 const CASES: Record<string, Float32Array> = {
   linearMatrix: correction([0.03, 1.5, -0.14, 0.004, 0, 1.2, 0, -0.01, 0, 0, 0.45, -0.04]),
+  // As UWCC's own method produces for a dark frame: the matrix, then the tone curve.
+  tone: correction([0.2, 0.7, -0.05, 0.002, 0, 0.6, 0, -0.004, 0, 0, 0.35, -0.01], { tone: 3.5 }),
   encodedMatrix: correction([2.1, -0.6, 0.9, -0.2, 0, 1.4, 0, -0.1, 0, 0, 1.5, -0.4], { encoded: true }),
   compensation: correction([2.4, 0, 0, 0, 0, 1.1, 0, 0, 0, 0, 0.6, 0], { encoded: true, comp: [0.33, 0.08] }),
   ranged: correction([0.9, 0, 0, 0, 0, 0.5, 0, 0, 0, 0, 0.45, 0], {

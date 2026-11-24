@@ -65,11 +65,18 @@ pub fn corrected_linear(srgb: [f32; 3], c: &Correction, strength: f32, local: &L
             y[ch] = (f.weight * first + (1.0 - f.weight) * second + f.offset[ch]).max(0.0);
         }
     }
-    // Back to linear light, and blend with the original by `strength`.
+    // Back to linear light; 1f, the tone curve; then blend with the original by `strength`.
     [0, 1, 2].map(|ch| {
         let corrected = if c.encoded { srgb_to_linear(y[ch].min(1.0)) } else { y[ch] };
+        let corrected = tone_curve(corrected, c.tone);
         lin[ch] + (corrected - lin[ch]) * strength
     })
+}
+
+/// Step 1f: raises shadows and mid-tones (slope `tone` at black) and keeps
+/// 1 at 1, so highlights are compressed instead of clipped. `tone = 1` is no change.
+pub fn tone_curve(x: f32, tone: f32) -> f32 {
+    x * tone / (1.0 + (tone - 1.0) * x)
 }
 
 /// Steps 1a to 1c: working values, compensation, range step.
@@ -199,6 +206,21 @@ mod tests {
         let before = px.clone();
         apply_rgba8(&mut px, 16, &Correction::IDENTITY, &Adjustments::default(), None);
         assert_eq!(px, before);
+    }
+
+    #[test]
+    fn tone_curve_lifts_shadows_and_keeps_the_ends() {
+        assert_eq!(tone_curve(0.0, 3.0), 0.0);
+        assert!((tone_curve(1.0, 3.0) - 1.0).abs() < 1e-6);
+        assert_eq!(tone_curve(0.3, 1.0), 0.3);
+        // Near black the slope is the tone value; the curve stays monotonic.
+        assert!((tone_curve(0.001, 3.0) / 0.001 - 3.0).abs() < 0.02);
+        let values: Vec<f32> = (0..=20).map(|i| tone_curve(i as f32 / 20.0, 3.0)).collect();
+        assert!(values.windows(2).all(|w| w[1] > w[0]));
+        // In the pipeline: a mid grey gets brighter, hue-neutral.
+        let c = Correction { tone: 3.0, ..Correction::IDENTITY };
+        let out = apply_pixel([0.3, 0.3, 0.3], &c, &Adjustments::default(), 0.0);
+        assert!(out[0] > 0.45 && (out[0] - out[1]).abs() < 1e-6 && (out[1] - out[2]).abs() < 1e-6);
     }
 
     #[test]

@@ -1,4 +1,4 @@
-import { type Adjustments, FUSION_AT, RANGE_NODES, shaderValues } from '../model';
+import { type Adjustments, FUSION_AT, RANGE_NODES, TONE_AT, shaderValues } from '../model';
 
 /** The maps of the image a correction may need, each in the flat form the core returns. */
 export type FrameMaps = { range?: Float32Array; fusion?: Float32Array };
@@ -43,7 +43,7 @@ export class CorrectionRenderer {
 
     for (const name of [
       'u_tex', 'u_encoded', 'u_comp', 'u_ranged', 'u_backscatter', 'u_logGain', 'u_range', 'u_rangeSize', 'u_rangeRect',
-      'u_fusion', 'u_gamma', 'u_sharpen', 'u_fusionA', 'u_fusionB', 'u_fusionSize',
+      'u_fusion', 'u_gamma', 'u_tone', 'u_sharpen', 'u_fusionA', 'u_fusionB', 'u_fusionSize',
       'u_matrix', 'u_offset', 'u_strength', 'u_whiteBalance', 'u_exposure', 'u_contrast', 'u_saturation', 'u_split',
     ]) {
       this.uniforms[name] = gl.getUniformLocation(program, name);
@@ -152,6 +152,7 @@ export class CorrectionRenderer {
     // Without fusion maps the step is skipped, as in the core's reference.
     gl.uniform1f(u.u_fusion, this.fusionSize ? c[FUSION_AT] : 0);
     gl.uniform1f(u.u_gamma, c[FUSION_AT + 1]);
+    gl.uniform1f(u.u_tone, c[TONE_AT]);
     gl.uniform2f(u.u_sharpen, c[FUSION_AT + 2], c[FUSION_AT + 3]);
     gl.uniform2f(u.u_fusionSize, ...(this.fusionSize ?? [1, 1]));
     const values = shaderValues(adjustments);
