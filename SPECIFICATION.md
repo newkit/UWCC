@@ -409,6 +409,19 @@ the same numbers as before. Limit: a subject that fills most of the frame
 in front of a little open water falls below that range, and its water then
 gets some red and turns greyer.
 
+The all-water rule came from a photo from the owner of a turtle seen from
+below against the surface (kept in `testdata/local/` with a corrected
+version of a slightly different frame as the reference; not a pixel pair,
+so compared by eye and by mean colour). The whole frame is water, its
+green/blue ratio hardly varies, and almost all of it counted as scene, so
+step 5 balanced the water itself to grey and it came out beige with a
+reddish turtle. A frame now counts as water throughout as the relative
+spread of its green/blue ratio (`(p90 - p2) / p90`) falls from 0.45 to
+0.3; such a frame is balanced to a light blue (linear 0.8 : 1 : 1.2)
+instead of grey. The reference's mean colour is 142 / 157 / 168 (sRGB);
+UWCC now gives 154 / 172 / 188, before the change 170 / 172 / 173. All
+other photos and clips have a spread of 0.58 or more and are unchanged.
+
 Caveat: the constants were tuned on four pairs, three of them from similar
 deep-blue conditions, plus those two clips. They are a starting point and will need
 revisiting with green water and more shallow footage. When the automatic

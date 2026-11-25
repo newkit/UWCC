@@ -20,6 +20,8 @@
 //!    there is open water.
 //! 5. Balance the channels on scene content only; open water is excluded so
 //!    that a frame full of blue does not turn the reef yellow.
+//!    A frame that is open water throughout (its green/blue ratio hardly
+//!    varies) has no scene to balance on and is balanced to a light blue.
 //! 6. Scale to a common white level, with a cap on the gains to limit noise.
 //! 7. Where the result is dark although its highlights are already at the
 //!    white level (a frame of shadow with a few lit parts), raise shadows
@@ -51,6 +53,12 @@ const WATER_SUBTRACT_MIN: f32 = 0.6;
 const SCENE_RAMP: (f32, f32) = (0.2, 0.6);
 /// Below this relative spread of the ratio, the frame has no distinct open water.
 const MIN_RATIO_SPREAD: f32 = 0.15;
+/// Relative spread of the green/blue ratio (`(p90 - p2) / p90`) at which a
+/// frame counts as open water throughout: fully below the first value, not at all above the second.
+const ALL_WATER_SPREAD: (f32, f32) = (0.3, 0.45);
+/// Linear channel proportions (mean 1) that a frame of open water is balanced to:
+/// a light blue, measured on the owner's reference for such a frame.
+const WATER_TINT: [f32; 3] = [0.8, 1.0, 1.2];
 /// Black-point percentile for green and blue, and for red that is not rebuilt.
 const BLACK_PERCENTILE: f32 = 0.5;
 /// Black-point percentile for fully rebuilt red: high, so that open water
@@ -216,7 +224,14 @@ fn analyze_with(px: &[[f32; 3]], always: bool) -> Analysis {
     if avg <= 0.0 || scene_mean.iter().any(|&m| m <= 0.0) {
         return Analysis { depletion, scene_fraction, water_ratio, ..Analysis::NEUTRAL };
     }
-    let balance = [(avg / scene_mean[0]) as f32, (avg / scene_mean[1]) as f32, (avg / scene_mean[2]) as f32];
+    // A frame whose green/blue ratio hardly varies is one medium throughout:
+    // open water, seen up towards the surface or out into the blue. There is
+    // no scene to balance on; balancing the water itself to grey would turn
+    // it beige. Balance it to a light water blue instead.
+    let rel_spread = if scene_ratio > 0.0 { spread / scene_ratio } else { 0.0 };
+    let all_water = 1.0 - smoothstep(ALL_WATER_SPREAD.0, ALL_WATER_SPREAD.1, rel_spread);
+    let tint = [0, 1, 2].map(|ch| 1.0 + (WATER_TINT[ch] - 1.0) * all_water);
+    let balance = [0, 1, 2].map(|ch| (avg / scene_mean[ch]) as f32 * tint[ch]);
 
     // 6. White level and gain cap.
     let mut hi = 0.0f32;
@@ -404,6 +419,23 @@ mod tests {
         let a = analyze_linear(&px);
         assert_eq!(a.strength, 0.0);
         assert_eq!(a.correction, Correction::IDENTITY);
+    }
+
+    /// A frame of nothing but open water (looking up to the surface) must stay blue, not turn beige.
+    #[test]
+    fn frame_of_open_water_stays_blue() {
+        // No red, green/blue ratio 0.3..0.42 whatever the brightness: one medium throughout.
+        let px: Vec<[f32; 3]> = (0..4000)
+            .map(|i| {
+                let blue = 0.2 + 0.6 * i as f32 / 4000.0;
+                let ratio = 0.3 + 0.12 * ((i * 37) % 4000) as f32 / 4000.0;
+                [0.0, ratio * blue, blue]
+            })
+            .collect();
+        let a = analyze_linear(&px);
+        let m = a.correction.m;
+        let out: Vec<f32> = (0..3).map(|ch| m[ch][1] * 0.36 * 0.5 + m[ch][2] * 0.5 + m[ch][3]).collect();
+        assert!(out[2] > 1.1 * out[1] && out[1] > 1.1 * out[0], "water should stay blue: {out:?}");
     }
 
     /// Mostly shadow with a few bright parts: gains cannot brighten it, the tone curve must.
