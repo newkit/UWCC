@@ -10,6 +10,25 @@ Android.
 Everything runs on your device. There is no account, no upload, no backend
 and no analytics, and the web app keeps working offline once it has loaded.
 
+## Examples
+
+Original on the left, UWCC's automatic correction on the right, with no
+manual adjustments.
+
+![Hawksbill turtle on a reef, before and after](docs/images/turtle.jpg)
+
+![Batfish in front of a reef wall, before and after](docs/images/batfish.jpg)
+
+![Soft coral with a diver in the background, before and after](docs/images/coral.jpg)
+
+![Turtle seen from below against the surface, before and after](docs/images/surface.jpg)
+
+![Pod of dolphins over sand, before and after](docs/images/dolphins.jpg)
+
+The images are rendered from the originals in `testdata/photos/` by
+`core/examples/before_after.rs`
+(`cargo run --release --example before_after -- ../docs/images ../testdata/photos/turtle_before.jpg ...` in `core/`).
+
 ## Features
 
 - Automatic correction of photos (JPEG, PNG, HEIC where the platform decodes
