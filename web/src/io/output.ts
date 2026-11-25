@@ -1,15 +1,19 @@
 // Where results go (SPECIFICATION.md §7): beside the source, replacing the
-// source, or the browser's download folder when neither is possible.
+// source, or, when neither is possible, the photo library on iOS
+// (`photos.ts`) and the browser's download folder elsewhere.
 
 import type { OutputMode } from '../settings/settings';
+import { photoLibrary } from './photos';
 import type { Source } from './sources';
 
 export type WriteResult = {
-  kind: 'folder' | 'replaced' | 'download';
+  kind: 'folder' | 'replaced' | 'download' | 'photos';
   /** Human-readable place of the result. */
   location: string;
   /** Set when the requested mode could not be honoured for this item. */
   note?: string;
+  /** For `photos`: the result, waiting to be saved through the share sheet (`io/photos.ts`). */
+  pending?: File;
 };
 
 type Permissioned = { queryPermission?: (o: object) => Promise<PermissionState>; requestPermission?: (o: object) => Promise<PermissionState> };
@@ -119,6 +123,10 @@ export async function deliver(
     const finalName = await freeName(dir, name);
     await writeFile(await dir.getFileHandle(finalName, { create: true }), blob);
     return { kind: 'folder', location: `${dir.name}/${finalName}`, note };
+  }
+  if (photoLibrary) {
+    const file = new File([blob], name, { type: format === 'jpg' ? 'image/jpeg' : 'video/mp4' });
+    return { kind: 'photos', location: 'Waiting for “Save to Photos”', note, pending: file };
   }
   downloadBlob(blob, name);
   return { kind: 'download', location: `Downloads/${name}`, note };

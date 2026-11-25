@@ -633,7 +633,8 @@ and becomes part of the M0 spike.
 | Platform | Next to source | Overwrite | Mechanism |
 |----------|----------------|-----------|-----------|
 | Desktop Chrome / Edge | Yes, when the user opens a folder or drops files / folders and grants write access | Yes | File System Access API |
-| Desktop Safari / Firefox, mobile browsers | No. Results go to the browser's download folder | No (setting shown as unavailable, with the reason) | Plain downloads |
+| Safari and other browsers on iPhone / iPad (web app) | No. Results go to the photo library through the share sheet ("Save Image" / "Save Video"); the user confirms each run with one tap | No | Web Share API with files (`web/src/io/photos.ts`) |
+| Desktop Safari / Firefox, Android browsers | No. Results go to the browser's download folder | No (setting shown as unavailable, with the reason) | Plain downloads |
 | iOS app, photo library | Yes: saved to the library with the source's date, and into the same album where there is one | Yes, as a revertible edit; iOS asks the user once per batch | PhotoKit, via a native plugin |
 | iOS app, Files | Yes, when a folder is picked | Yes | Document picker with folder access |
 | Android app, gallery | Yes: same folder (e.g. `DCIM/Camera`) | Yes; Android asks the user once per batch | MediaStore with a write request, via a native plugin |
@@ -650,6 +651,17 @@ Consequences:
   current store policy.
 - The UI always states where results will go before a run starts, because the
   answer differs per platform.
+- iOS web app: a page cannot write to Photos itself, and a download on iOS
+  lands in the Files app. The share sheet can save to Photos, but opens only
+  in response to a tap. After a single photo is saved, UWCC tries to open it
+  at once on the tap of "Save"; if that tap has expired (long exports,
+  batches), a "Save to Photos" bar hands all waiting results to one share
+  sheet. Results stay in memory until then (exported videos as their
+  temporary file, removed after 30 minutes or at the next start). The share
+  sheet does not say which target was chosen, so the app reports "passed to
+  the share sheet", not "saved". Used only where `navigator.canShare`
+  accepts files and the device is an iPhone or iPad; elsewhere results are
+  downloaded as before.
 
 ### 7.5 Robustness
 
@@ -659,6 +671,15 @@ Consequences:
 - Free space is checked before the run against an estimate of the output
   size.
 - Videos are streamed (§8), so batch size is limited by storage, not memory.
+
+### 7.6 Version
+
+The app's version is the version in `web/package.json` plus the short id of
+the commit it was built from, e.g. `0.1.0+9e5a8cd` (`-dirty` for a build with
+uncommitted changes). It is filled in at build time (`web/vite.config.ts`,
+`web/src/version.ts`), shown in the header and in Settings, and written into
+every JPEG after UWCC's marker ("UWCC corrected by UWCC 0.1.0+9e5a8cd"), so a
+result records which build made it.
 
 ## 8. Architecture
 
@@ -757,6 +778,10 @@ Status on 2026-11-24:
   clip was fast. No figures, self-test result or exported file yet.
 - Colour modes and a vibrance slider were added on 2026-11-24 (F6, §6.4);
   checked in headless Chromium only.
+- 2026-11-25: version number with commit id (§7.6); on iPhone and iPad the
+  web app saves results to Photos through the share sheet (§7.4). Checked in
+  headless Chromium with an iPhone user agent and a simulated share sheet;
+  not yet on a real iPhone.
 - M2: first version live: open or drop a photo, automatic correction, six
   manual controls with reset, split view, hold for original, neutral picker.
   Missing: zoom and pan.

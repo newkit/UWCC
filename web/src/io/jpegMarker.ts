@@ -2,6 +2,8 @@
 // recognised later even when its name gives no hint (for example an original
 // that was replaced in overwrite mode).
 
+import { VERSION } from '../version';
+
 const SIGNATURE = 'UWCC corrected';
 
 const isApp = (marker: number) => marker >= 0xe0 && marker <= 0xef;
@@ -15,7 +17,8 @@ export function tagJpeg(jpeg: ArrayBuffer): Blob {
     pos += 2 + ((bytes[pos + 2] << 8) | bytes[pos + 3]);
   }
   if (pos > bytes.length) pos = 2;
-  const text = new TextEncoder().encode(SIGNATURE);
+  // The signature is what is checked for; the version after it records which build wrote the file.
+  const text = new TextEncoder().encode(`${SIGNATURE} by UWCC ${VERSION}`);
   const segment = new Uint8Array(4 + text.length);
   segment.set([0xff, 0xfe, (text.length + 2) >> 8, (text.length + 2) & 0xff]);
   segment.set(text, 4);

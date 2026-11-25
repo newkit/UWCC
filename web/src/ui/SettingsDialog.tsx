@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { fsAccess } from '../io/sources';
 import { ALGORITHMS, type Algorithm, COLOR_MODES, type ColorMode } from '../model';
 import { cleanSuffix, type Settings } from '../settings/settings';
+import { VERSION } from '../version';
 
 type Props = { open: boolean; settings: Settings; onChange: (next: Settings) => void; onClose: () => void };
 
@@ -90,6 +91,7 @@ export function SettingsDialog({ open, settings, onChange, onClose }: Props) {
         </label>
 
         <div className="dialog-actions">
+          <small className="version">UWCC {VERSION}</small>
           <button type="submit" className="primary">Done</button>
         </div>
       </form>

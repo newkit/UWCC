@@ -4,6 +4,8 @@ import { fromDirectory, fromDrop, fromFiles, fsAccess, pickFiles, pickFolder, pi
 import type { Adjustments, Algorithm } from '../model';
 import { type Settings, useSettings } from '../settings/settings';
 import { removeStaleTempFiles } from '../io/tempFiles';
+import { photoLibrary, shareToPhotos } from '../io/photos';
+import { VERSION } from '../version';
 import { EditorView } from './EditorView';
 import { QueueView, type RunState } from './QueueView';
 import { SettingsDialog } from './SettingsDialog';
@@ -38,6 +40,9 @@ function describeDestination(jobs: Job[], settings: Settings): string {
     if (withHandle.length === 0) return `Originals cannot be replaced here; results are ${next}.`;
     return `JPEG photos and MP4 videos are replaced. Other results are ${next}.`;
   }
+  if (withDir.length === 0 && photoLibrary) {
+    return 'Results go to Photos: when they are done, tap “Save to Photos” and choose “Save Image” or “Save Video”.';
+  }
   return `Results are ${next}, with "${settings.suffix}" added to the name.`;
 }
 
@@ -65,6 +70,13 @@ export function App() {
 
   const patch = useCallback((id: number, change: Partial<Job>) => {
     setJobs((list) => list.map((job) => (job.id === id ? { ...job, ...change } : job)));
+  }, []);
+
+  /** Results handed to the share sheet: the user saved them there (or chose another target). */
+  const markShared = useCallback((ids: number[]) => {
+    setJobs((list) => list.map((job) => (ids.includes(job.id) && job.result
+      ? { ...job, result: { ...job.result, pending: undefined, location: 'Passed to the share sheet' } }
+      : job)));
   }, []);
 
   const addSources = useCallback((sources: Source[]) => {
@@ -162,7 +174,14 @@ export function App() {
         const fresh = jobsRef.current.find((j) => j.id === job.id) ?? job;
         const result = await process(fresh, current, fallbackDir, (progress) => patch(job.id, { progress }), controller.signal);
         patch(job.id, { status: 'done', result, progress: 1 });
-        if (single) setNotice(result.kind === 'replaced' ? `Replaced ${result.location}.` : `Saved as ${result.location}.${result.note ? ' ' + result.note : ''}`);
+        if (single && result.pending) {
+          // The tap on Save may still count; otherwise the Save to Photos bar asks for another.
+          const outcome = await shareToPhotos([result.pending]);
+          if (outcome === 'shared') markShared([job.id]);
+          if (outcome === 'failed') setError('The share sheet could not be opened. Try “Save to Photos” again.');
+        } else if (single) {
+          setNotice(result.kind === 'replaced' ? `Replaced ${result.location}.` : `Saved as ${result.location}.${result.note ? ' ' + result.note : ''}`);
+        }
       } catch (e) {
         if (isCancel(e)) {
           patch(job.id, { status: 'ready', progress: undefined });
@@ -177,7 +196,7 @@ export function App() {
     if (!single) setRun({ active: false, total: targets.length, finished, cancelled: controller.signal.aborted });
     abort.current = null;
     try { await wakeLock?.release(); } catch { /* ignore */ }
-  }, [patch]);
+  }, [patch, markShared]);
 
   // Drop files or folders anywhere on the page.
   useEffect(() => {
@@ -267,6 +286,13 @@ export function App() {
       : (editingJob.progress ?? 0) < 0.7 ? `Correcting… ${Math.round(((editingJob.progress ?? 0) / 0.7) * 100)}%` : 'Encoding and saving…'
     : null;
 
+  const waiting = jobs.filter((j) => j.result?.pending);
+  const saveToPhotos = async () => {
+    const outcome = await shareToPhotos(waiting.map((j) => j.result!.pending!));
+    if (outcome === 'shared') markShared(waiting.map((j) => j.id));
+    if (outcome === 'failed') setError('The share sheet could not be opened. Try again, or save fewer files at once.');
+  };
+
   const remove = (ids: number[]) => {
     ids.forEach((id) => removed.current.add(id));
     setJobs((list) => list.filter((j) => !ids.includes(j.id)));
@@ -280,7 +306,7 @@ export function App() {
   return (
     <div className={'app' + (dragOver ? ' drag-over' : '')}>
       <header>
-        <h1>UWCC <span>UnderWater Color Correction</span></h1>
+        <h1>UWCC <span>UnderWater Color Correction</span> <small className="version" title="Version and commit">{VERSION}</small></h1>
         <div className="actions">
           {editingJob && jobs.length > 1 && <button type="button" className="ghost" onClick={() => setEditing(null)} disabled={running}>Back to list</button>}
           {jobs.length > 0 && !editingJob && <button type="button" className="ghost" onClick={clearAll} disabled={active}>Clear</button>}
@@ -307,6 +333,12 @@ export function App() {
       />
 
       {error && <div className="banner error" role="alert"><span>{error}</span><button type="button" onClick={() => setError(null)} aria-label="Dismiss">×</button></div>}
+      {waiting.length > 0 && !active && (
+        <div className="banner photos" role="status">
+          <span>{waiting.length === 1 ? `${waiting[0].source.name} is ready.` : `${waiting.length} results are ready.`} In the sheet that opens, choose “Save {waiting.length === 1 ? '' : `${waiting.length} `}{waiting.every((j) => !j.video) ? 'Image' : waiting.every((j) => j.video) ? 'Video' : 'Item'}{waiting.length === 1 ? '' : 's'}”.</span>
+          <button type="button" className="primary" onClick={() => void saveToPhotos()}>Save to Photos</button>
+        </div>
+      )}
       {notice && <div className="banner" role="status"><span>{notice}</span><button type="button" onClick={() => setNotice(null)} aria-label="Dismiss">×</button></div>}
 
       {jobs.length === 0 ? (

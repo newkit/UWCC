@@ -162,8 +162,8 @@ export async function process(
       delivered = await deliver(job.source, result.blob, { ...target, format: 'mp4' });
       return delivered;
     } finally {
-      // A download reads the temporary file after this returns; it is removed later, or at the next start.
-      if (delivered?.kind === 'download') setTimeout(() => void result.cleanup(), 30 * 60_000);
+      // A download or the share sheet reads the temporary file after this returns; it is removed later, or at the next start.
+      if (delivered?.kind === 'download' || delivered?.kind === 'photos') setTimeout(() => void result.cleanup(), 30 * 60_000);
       else await result.cleanup();
     }
   }
