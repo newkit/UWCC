@@ -113,6 +113,18 @@ fn bannerfish_is_closer_with_the_vivid_look() {
     assert!(with_look < plain - 0.01, "vivid {with_look:.4} should be closer than natural {plain:.4}");
 }
 
+#[test]
+fn batfish_matches_target() {
+    check_pair("batfish", 0.065, 0.9, 0.35);
+}
+
+/// A turtle seen from below against the surface: the frame is open water
+/// throughout. The target keeps the water nearly neutral and the turtle dark.
+#[test]
+fn surface_matches_target() {
+    check_pair("surface", 0.075, 0.9, 0.35);
+}
+
 /// Open water must stay blue: the correction must not balance the whole frame to grey.
 #[test]
 fn coral_water_stays_blue() {
@@ -145,9 +157,15 @@ fn flash_photo_is_left_alone() {
 #[test]
 fn every_method_gives_a_sane_result() {
     use uwcc_core::{analyze, Algorithm, RangeMap};
-    for name in
-        ["turtle_before.jpg", "dolphins_before.jpg", "coral_before.jpg", "coral_flash.jpg", "bannerfish_before.jpg"]
-    {
+    for name in [
+        "turtle_before.jpg",
+        "dolphins_before.jpg",
+        "coral_before.jpg",
+        "coral_flash.jpg",
+        "bannerfish_before.jpg",
+        "batfish_before.jpg",
+        "surface_before.jpg",
+    ] {
         let (before, w, h) = load(name);
         for algorithm in Algorithm::ALL {
             let analysis = analyze(algorithm, &before, w as usize, h as usize);

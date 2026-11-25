@@ -273,8 +273,9 @@ and strong ones are hardly moved.
 
 ### 6.5 Findings from the owner's reference pairs
 
-`testdata/photos/` holds four before/after pairs supplied by the owner
-(`dolphins_*`, `turtle_*`, `coral_*`, and since 2026-11-24 `bannerfish_*`;
+`testdata/photos/` holds six before/after pairs supplied by the owner
+(`dolphins_*`, `turtle_*`, `coral_*`, since 2026-11-24 `bannerfish_*`, and
+since 2026-11-25 `batfish_*` and `surface_*`;
 1500x2000 and 2000x1500 JPEG) and one flash photo of the coral scene
 (`coral_flash.jpg`). The "after" images are the target look. Measured on
 the first three:
@@ -361,7 +362,8 @@ file). In linear light, on a copy of about 256 px:
 
 Mean error against the targets, per channel RMS on 0..1 sRGB values, with the
 uncorrected original in brackets: turtle 0.021 (0.235), dolphins 0.035
-(0.299), coral 0.050 (0.236), bannerfish 0.095 (0.163). The flash photo is
+(0.299), coral 0.050 (0.236), bannerfish 0.095 (0.163), batfish 0.050
+(0.189), surface 0.058 (0.309). The flash photo is
 left unchanged. `core/tests/reference_images.rs` holds regression thresholds
 a little above these numbers.
 
@@ -409,20 +411,24 @@ the same numbers as before. Limit: a subject that fills most of the frame
 in front of a little open water falls below that range, and its water then
 gets some red and turns greyer.
 
-The all-water rule came from a photo from the owner of a turtle seen from
-below against the surface (kept in `testdata/local/` with a corrected
-version of a slightly different frame as the reference; not a pixel pair,
-so compared by eye and by mean colour). The whole frame is water, its
-green/blue ratio hardly varies, and almost all of it counted as scene, so
-step 5 balanced the water itself to grey and it came out beige with a
-reddish turtle. A frame now counts as water throughout as the relative
-spread of its green/blue ratio (`(p90 - p2) / p90`) falls from 0.45 to
-0.3; such a frame is balanced to a light blue (linear 0.8 : 1 : 1.2)
-instead of grey. The reference's mean colour is 142 / 157 / 168 (sRGB);
-UWCC now gives 154 / 172 / 188, before the change 170 / 172 / 173. All
-other photos and clips have a spread of 0.58 or more and are unchanged.
+The all-water rule came from the `surface_*` pair: a turtle seen from below
+against the surface, so the whole frame is water and its green/blue ratio
+hardly varies. Rebuilding red there gives the bluest pixels a negative red
+value, the red black point (step 4) came out negative, and its offset added
+red to every dark pixel: the turtle turned red-brown. A frame now counts as
+water throughout as the relative spread of its green/blue ratio
+(`(p90 - p2) / p90`) falls from 0.45 to 0.3; on such a frame no black point
+is below zero. Error on the pair 0.087 before, 0.058 after. The target keeps
+the water close to neutral grey, so the water is still balanced to grey
+like any scene. An earlier version of the rule (one day, from a reference
+of a different frame) balanced such water to light blue instead; the pixel
+pair showed that to be wrong and it was removed. Clamping the black point
+on every frame was tried as well: it made dolphins worse (0.035 to 0.048),
+because there the negative red black point lifts the shadows the target
+lifts too. All other pairs and clips have a spread of 0.58 or more and are
+unchanged.
 
-Caveat: the constants were tuned on four pairs, three of them from similar
+Caveat: the constants were tuned on six pairs, five of them from similar
 deep-blue conditions, plus those two clips. They are a starting point and will need
 revisiting with green water and more shallow footage. When the automatic
 correction decides to apply nothing, the Correction slider cannot force it
