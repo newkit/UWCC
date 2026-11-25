@@ -52,6 +52,7 @@ architecture and the milestone status.
 | `web/` | The app: React, TypeScript, Vite, WebGL2, WebCodecs |
 | `spike/m0/` | Throwaway device test page for milestone M0 |
 | `testdata/photos/` | Before/after reference pairs used by the core's regression tests and as in-app samples |
+| `docs/images/` | The README examples |
 
 ## Building
 
