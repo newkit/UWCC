@@ -677,7 +677,7 @@ Consequences:
 The app's version is the version in `web/package.json` plus the short id of
 the commit it was built from, e.g. `0.1.0+9e5a8cd` (`-dirty` for a build with
 uncommitted changes). It is filled in at build time (`web/vite.config.ts`,
-`web/src/version.ts`), shown in the header and in Settings, and written into
+`web/src/version.ts`), shown in the header, on the start page and in Settings, and written into
 every JPEG after UWCC's marker ("UWCC corrected by UWCC 0.1.0+9e5a8cd"), so a
 result records which build made it.
 

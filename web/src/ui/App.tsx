@@ -357,6 +357,7 @@ export function App() {
                 <button type="button" className="ghost" key={s.name} onClick={() => openSample(s)} disabled={opening}>{s.label}</button>
               ))}
             </div>
+            <p className="welcome-version">Version {VERSION}</p>
           </div>
         </main>
       ) : editingJob ? (
