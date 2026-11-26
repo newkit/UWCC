@@ -434,6 +434,66 @@ revisiting with green water and more shallow footage. When the automatic
 correction decides to apply nothing, the Correction slider cannot force it
 on; that override is not built yet.
 
+#### Synthetic test set (2026-11-26)
+
+To test the methods on more than six pairs, and on water other than deep
+blue, `core/examples/synthetic.rs` makes underwater images from photos taken
+in air, for which the correct answer is known. The water is added with the
+revised image formation model of Akkaynak and Treibitz (CVPR 2018): direct
+signal attenuated over the distance to the camera, backscatter, daylight
+already filtered by the depth below the surface. Distance comes from the
+app's depth model run on the clean photo, anchored at 0.8 m (nearest) and
+12 m (farthest; sky becomes open water). Five water types, ordered like
+Jerlov's: three ocean types tuned so open water is as blue as in the
+owner's photos (green/blue 0.15-0.45 in linear light), and two greener
+coastal types. Three depths below the surface (3, 8, 15 m). The camera
+keeps a daylight white balance, exposes for a mean luminance of 0.18, adds
+mild noise and stores JPEG. Clean photos: the 24 images of the Kodak
+lossless test suite, kept with their depth maps in `testdata/local/` and
+not committed, giving 360 test images. The methods are run the way the app
+runs them (analysis and maps on a 256 px copy). Scores count only pixels
+where the scene, not the water, dominates, since open water has no correct
+colour.
+
+Results, mean colour difference (CIE76 ΔE) after matching exposure, lower is
+better; chroma relative to the target in brackets (below 1 is duller,
+above 1 is mostly a leftover cast):
+
+| Method | Synthetic, ocean | Synthetic, coastal | Synthetic, all | Owner's pairs |
+|---|---|---|---|---|
+| Uncorrected | 44.5 | 50.3 | 46.8 (2.58) | 51.4 |
+| UWCC | 23.5 | 30.9 | 26.4 (1.36) | **9.0** (1.25) |
+| Hue-shift matrix | 23.7 | 23.7 | 23.7 (1.39) | 27.5 |
+| Ancuti white balance | **13.3** | **17.7** | **15.1** (0.64) | 15.3 (0.86) |
+| Ancuti balance and fusion | 16.1 | 21.3 | 18.2 (0.77) | 17.7 |
+| Sea-thru (estimated range) | 27.4 | 26.7 | 27.1 (1.90) | 22.8 |
+| Sea-thru (depth model) | 28.6 | 29.9 | 29.1 (1.67) | 22.8 (no depth run) |
+| UDCP | 42.9 | 43.3 | 43.1 (2.63) | 69.9 |
+
+Findings:
+
+- The rankings disagree. On the owner's pairs UWCC is far ahead; on the
+  synthetic set Ancuti's white balance is best in every water type, and
+  UWCC is worse than the uncorrected image on 46 of 360 images. UWCC's
+  constants were tuned on those six pairs, so part of its lead there is
+  fitting; part may be the synthetic set (in-air subjects such as people,
+  houses and sky rather than reefs, and a simple camera).
+- UWCC is weakest in green water (ΔE 32.7 and 29.1 in the two coastal types,
+  against 20.9-25.6 in ocean water), where results keep a teal cast.
+  None of the owner's pairs is from green water. Not yet diagnosed.
+- Ancuti scores well partly by being cautious: its results are duller than
+  the target (chroma 0.64), and the error measures reward a greyish answer
+  over a confidently wrong colour. By eye its results look flat.
+- Sea-thru gives the most vivid results and often looks closest by eye in
+  blue water, but overshoots (chroma 1.9) and amplifies noise.
+- The synthetic set is the training data an ML method (§2, out of scope for
+  v1) would need; these numbers are the baseline it would have to beat.
+
+Run: `cargo run --release --example synthetic -- make DIR CLEAN.png...`,
+then the depth model on the results (for Sea-thru with depth), then
+`... -- score DIR [SHEET.jpg]`; `... -- pairs ../testdata/photos` gives the
+same measures on the owner's pairs.
+
 ### 6.6 Validation plan (M1)
 
 1. Collect real examples: unedited originals, covering shallow and deep, blue
@@ -801,6 +861,9 @@ Status on 2026-11-24:
   web app saves results to Photos through the share sheet (§7.4). Checked in
   headless Chromium with an iPhone user agent and a simulated share sheet;
   not yet on a real iPhone.
+- 2026-11-26: synthetic test set of 360 images and a comparison of all
+  methods on it (§6.5). UWCC does well on the owner's blue-water pairs but
+  not in synthetic green water; not acted on yet.
 - M2: first version live: open or drop a photo, automatic correction, six
   manual controls with reset, split view, hold for original, neutral picker.
   Missing: zoom and pan.
